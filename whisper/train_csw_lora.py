@@ -39,6 +39,12 @@ if local_rank != 0:
     warnings.filterwarnings("ignore")  # Ignore all warnings
 
 parser = argparse.ArgumentParser(description='create_dataset_whisper')
+parser.add_argument('-model_size', type=str, default="small",
+                    help='Whisper Model size: ["large", "small".')
+parser.add_argument('-low_rank_type', type=str, default="lora",
+                    help='Whisper Model size: ["lora", "pissa", "olora", "eva", "rslora", "dora"')
+parser.add_argument('-low_rank_modules', type=str, default="qv",
+                    help='Whisper Model size: ["qv", "all-linear"')
 parser.add_argument('-dataset', required=True,
                     help="Path to the dataset in huggingface format")
 parser.add_argument('-learning_rate', type=float, default=0.001,
@@ -52,10 +58,16 @@ parser.add_argument('-lr_scheduler', type=str, default="inv_sqrt",
                     help='LR scheduler: ["inv_sqrt", "cosine".')
 parser.add_argument('-spec_augment', action='store_true',
                     help="Use spec augmentation")
-parser.add_argument('-label_smoothing', type=float, default=0.1,
+parser.add_argument('-label_smoothing', type=float, default=0.0,
                     help="""Label smoothing""")
 parser.add_argument('-no_progress_bar', action='store_true',
                     help="Use spec augmentation")
+parser.add_argument('-batch_size', type=int, default=8,
+                    help='Batch size during decoding ')
+parser.add_argument('-batch_size', type=int, default=8,
+                    help='Batch size during training (per device)')
+parser.add_argument('-gradient_accumulation', type=int, default=2,
+                    help='Number of gradient accumulation steps')
 args = parser.parse_args()
 
 # TODO: add option to
@@ -109,7 +121,13 @@ def count_parameters(model: nn.Module):
 
 device = device if torch.cuda.is_available() else "cpu"
 torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-model_name = "openai/whisper-large-v3-turbo"
+# model_name = "openai/whisper-large-v3-turbo"
+# model_
+if args.model_size == "large":
+    model_name = "openai/whisper-large-v3-turbo"
+else:
+    model_name = "openai/whisper-small"
+
 checkpoint_path = model_name
 
 processor = AutoProcessor.from_pretrained(model_name)
@@ -126,8 +144,74 @@ print("pad_token_id: {}".format(model.config.pad_token_id))
 
 print(model)
 
-lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05,
-                         bias="none")  # , modules_to_save=["pre_proj_out"])
+if args.low_rank_modules == "qv":
+
+    lora_target_modules = ["q_proj", "v_proj"]
+
+elif args.low_rank_modules == "all-linear":
+
+    lora_target_modules = "all-linear"
+
+else:
+    raise NotImplementedError
+
+if args.low_rank_type == "lora":
+    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
+                             bias="none")  # , modules_to_save=["pre_proj_out"])
+elif args.low_rank_type == "pissa":
+    """
+    PiSSA initializes the LoRA adapter using the principal singular values and singular vectors
+    """
+    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+                             init_lora_weights="pissa",
+                             lora_dropout=0.05,
+                             bias="none")  # , modules_to_save=["pre_proj_out"])
+
+elif args.low_rank_type == "olora":
+    """
+    Olora: QR decomposition to initialize the LoRA adapters. OLoRA translates the base weights of the model by a factor of their QR decompositions, 
+    i.e., it mutates the weights before performing any training on them
+    """
+
+    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+                             init_lora_weights="olora",
+                             lora_dropout=0.05,
+                             bias="none")  # , modules_to_save=["pre_proj_out"])
+
+elif args.low_rank_type == "eva":
+
+    """
+    EVA performs SVD on the input activations of each layer and uses the right-singular vectors to initialize LoRA weights
+    """
+    from peft import EvaConfig
+
+    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+                             init_lora_weights="eva",
+                             eva_config=EvaConfig(rho=2.0),
+                             lora_dropout=0.05,
+                             bias="none")  # , modules_to_save=["pre_proj_out"])
+
+elif args.low_rank_type == "rslora":
+
+    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+                             use_rslora=True,
+                             lora_dropout=0.05,
+                             bias="none")  # , modules_to_save=["pre_proj_out"])
+
+elif args.low_rank_type == "dora":
+    """
+    decomposes the updates of the weights into two parts, magnitude and direction. 
+    Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter
+    """
+
+    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+                             use_dora=True,
+                             lora_dropout=0.05,
+                             bias="none")  # , modules_to_save=["pre_proj_out"])
+
+else:
+    raise NotImplementedError
+
 model.add_adapter(lora_config)
 
 count_parameters(model)
@@ -148,17 +232,6 @@ optimizer = torch.optim.AdamW(
 # )
 
 if args.lr_scheduler in ['inv_sqrt', 'noam']:
-    # def inverse_sqrt_scheduler(_optimizer, num_warmup_steps=1000):
-    #     def lr_lambda(current_step):
-    #         if current_step < num_warmup_steps:
-    #             return float(current_step) / float(max(1, num_warmup_steps))
-    #         return (num_warmup_steps ** 0.5) / (current_step ** 0.5)
-    #
-    #     return LambdaLR(_optimizer, lr_lambda)
-    #
-    #
-    # lr_scheduler = inverse_sqrt_scheduler(optimizer, num_warmup_steps=args.warm_up_steps)
-
     lr_scheduler = get_inverse_sqrt_schedule(optimizer=optimizer, num_warmup_steps=warmup_steps)
 
 elif args.lr_scheduler == 'cosine':
@@ -167,14 +240,14 @@ elif args.lr_scheduler == 'cosine':
 else:
     raise NotImplementedError
 
-output_dir = "./model_" + args.dataset
+output_dir = "./model_%s_%s_%s" % (args.dataset, args.low_rank_type, args.low_rank_modules)
 
 # TODO: logging_dir
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,  # change to a repo name of your choice
     # logging_dir="/export/data1/data/eugan/ASR/model/DE.EN.AR.UA.ES.ZH.TR.JA/whisper.v3/log",
-    per_device_train_batch_size=8,
-    gradient_accumulation_steps=2,  # increase by 2x for every 2x decrease in batch size
+    per_device_train_batch_size=args.batch_size,
+    gradient_accumulation_steps=args.gradient_accumulation,  # increase by 2x for every 2x decrease in batch size
     learning_rate=learning_rate,  # 1e-3,#5e-5,
     warmup_steps=warmup_steps,
     # max_steps=180000,
@@ -194,7 +267,7 @@ training_args = Seq2SeqTrainingArguments(
     logging_steps=10,
     eval_accumulation_steps=100,
     dataloader_num_workers=4,
-    per_device_eval_batch_size=20,
+    per_device_eval_batch_size=32,
     dataloader_persistent_workers=False,
     label_smoothing_factor=0,  # 0.1,
     #   dataloader_prefetch_factor=2,
@@ -222,6 +295,7 @@ data_collator = DataCollatorSpeechSeq2SeqWithPadding(feature_extractor=processor
                                                      text_processor=processor.tokenizer, model_config=model.config,
                                                      uid_mapper=training_uid_mapper, dataset=train_dataset,
                                                      do_augment=args.spec_augment)
+
 eval_data_collator = DataCollatorSpeechSeq2SeqWithPadding(feature_extractor=processor.feature_extractor,
                                                           text_processor=processor.tokenizer, model_config=model.config,
                                                           uid_mapper=dev_uid_mapper, dataset=all_dev_dataset,
