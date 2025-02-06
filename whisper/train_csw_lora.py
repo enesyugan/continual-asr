@@ -63,8 +63,6 @@ parser.add_argument('-label_smoothing', type=float, default=0.0,
 parser.add_argument('-no_progress_bar', action='store_true',
                     help="Use spec augmentation")
 parser.add_argument('-batch_size', type=int, default=8,
-                    help='Batch size during decoding ')
-parser.add_argument('-batch_size', type=int, default=8,
                     help='Batch size during training (per device)')
 parser.add_argument('-gradient_accumulation', type=int, default=2,
                     help='Number of gradient accumulation steps')
@@ -240,7 +238,7 @@ elif args.lr_scheduler == 'cosine':
 else:
     raise NotImplementedError
 
-output_dir = "./model_%s_%s_%s" % (args.dataset, args.low_rank_type, args.low_rank_modules)
+output_dir = "outputs/model_%s_%s_%s_%s" % (args.model_size, args.dataset, args.low_rank_type, args.low_rank_modules)
 
 # TODO: logging_dir
 training_args = Seq2SeqTrainingArguments(

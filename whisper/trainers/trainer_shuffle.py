@@ -13,7 +13,6 @@ from decimal import Decimal, getcontext
 import torch.distributed as dist
 import shutil
 import warnings
-from typing import override
 
 from transformers.utils import (
     ADAPTER_CONFIG_NAME,
@@ -212,7 +211,6 @@ class MemSeq2SeqTrainer(StaticTrainer):
 
         return self.accelerator.prepare(DataLoader(eval_dataset, **dataloader_params))
 
-    @override
     def generate_epoch_dataloader(self):
 
         self.train_dataloader = self.get_train_dataloader()
