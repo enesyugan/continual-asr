@@ -247,6 +247,8 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         self.teacher_distillation = 0
         self.label_smoothing = 0
 
+
+
     def forward(
             self,
             input_features: Optional[torch.FloatTensor] = None,

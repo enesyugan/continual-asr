@@ -1,2 +1,0 @@
-transformers
-typing_extensions

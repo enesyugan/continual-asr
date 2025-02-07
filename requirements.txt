@@ -1,0 +1,3 @@
+transformers>=4.48.1
+typing_extensions
+accelerate>=1.1.1

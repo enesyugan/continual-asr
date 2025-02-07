@@ -66,6 +66,9 @@ parser.add_argument('-batch_size', type=int, default=8,
                     help='Batch size during training (per device)')
 parser.add_argument('-gradient_accumulation', type=int, default=2,
                     help='Number of gradient accumulation steps')
+
+parser.add_argument('-attn_implementation', type=str, default="flash_attention_2",
+                    help='Whisper Model size: ["flash_attention_2", "sdpa", "manual"')
 args = parser.parse_args()
 
 # TODO: add option to
@@ -131,7 +134,7 @@ checkpoint_path = model_name
 processor = AutoProcessor.from_pretrained(model_name)
 
 model = create_whisper_model(checkpoint_path, torch_dtype,
-                             attn_implementation="flash_attention_2",
+                             attn_implementation=args.attn_implementation,
                              low_cpu_mem_usage=True,
                              device_map={"": device})
 
