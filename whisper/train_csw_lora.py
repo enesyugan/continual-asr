@@ -96,6 +96,22 @@ elif args.dataset == 'arzen':
     print("DEV data: {}".format(all_dev_dataset))
     training_uid_mapper = None
     dev_uid_mapper = None
+elif args.dataset == 'ascend':
+    from prepare_data import get_data_ascend
+
+    all_tr_dataset, all_dev_dataset = get_data_ascend(debug=False)
+    print("Training data: {}".format(all_tr_dataset))
+    print("DEV data: {}".format(all_dev_dataset))
+    training_uid_mapper = None
+    dev_uid_mapper = None
+elif args.dataset == 'talcs':
+    from prepare_data import get_data_talcs
+
+    all_tr_dataset, all_dev_dataset = get_data_talcs(debug=False)
+    print("Training data: {}".format(all_tr_dataset))
+    print("DEV data: {}".format(all_dev_dataset))
+    training_uid_mapper = None
+    dev_uid_mapper = None
 else:
     raise NotImplementedError("Unknown dataset: {}".format(args.dataset))
 

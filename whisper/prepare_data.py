@@ -458,6 +458,10 @@ def get_data_seame(debug=False):
 
 
 def get_data_fisher(debug=False):
+	'''
+	 Spanish-English Telephone conversations
+	'''
+
     datasets = {}
 
     dev_list = []
@@ -490,6 +494,9 @@ def get_data_fisher(debug=False):
 
 
 def get_data_arzen(debug=False):
+	'''
+	 Arabic-English: spontaneous conversational speech corpus informal interviews, Egyptian-English; Setting: all recordings were carried out in a soundproof room.
+	'''
     datasets = {}
 
     dev_list = []
@@ -514,3 +521,65 @@ def get_data_arzen(debug=False):
     print(f"Dev data: {all_dev_dataset}")
 
     return datasets, all_dev_dataset
+
+def get_data_ascend(debug=False):
+  '''
+  A Spontanenous Chinese-English from Hong Kong conversations about different topics; Setting: The recordings are made in a quiet classroom.
+  Both speakers are seated across one another at a distance of ∼1 meter. Each speaker is equipped with a RODE SmartLav+ clip microphone as the recording device.
+  The microphone is mounted on the speaker’s shirt collar.
+  '''
+  datasets = {}
+  dev_list = []
+
+  print("Loading ASCEND ...")
+  ascend_train="ascend_train_notags.stm"
+  ascend_dev="ascend_dev_notags.stm"
+
+  shuffle_ascend_train_dataset = load_asr_dataset(ascend_train, "zh").shuffle(seed=42)
+  ascend_train_dataset = load_asr_dataset(ascend_train, "zh")
+  ascend_dev_dataset = load_asr_dataset(ascend_dev, "zh")
+
+  datasets["csw_train_dataset"] = shuffle_ascend_train_dataset
+  dev_list.append(ascend_dev_dataset)
+
+  all_dev_dataset = concatenate_datasets(dev_list)
+
+  print(datasets)
+  print("==="*20)
+  print(dev_list)
+
+  print("=====")
+  print(f"Dev data: {all_dev_dataset}")
+
+  return datasets, all_dev_dataset
+
+
+def get_data_talcs(debug=False):
+  '''
+  Spontaneous; Real online one-to-one English teaching Mandarin-English only teachers; different regions of China; Setting: recorded by the personal computer microphone
+  '''
+  datasets = {}
+  dev_list = []
+
+  print("Loading TALCS ...")
+  talcs_train = "talcs_train_time.stm"
+  talcs_dev = "talcs_dev_time.stm"
+
+  shuffle_talcs_train_dataset = load_asr_dataset(talcs_train, "zh").shuffle(seed=42)
+  talcs_train_dataset = load_asr_dataset(talcs_train, "zh")
+  talcs_dev_dataset = load_asr_dataset(talcs_dev, "zh")
+
+  datasets["csw_train_dataset"] = shuffle_talcs_train_dataset
+  dev_list.append(talcs_dev_dataset)
+
+  all_dev_dataset = concatenate_datasets(dev_list)
+
+  print(datasets)
+  print("==="*20)
+  print(dev_list)
+
+  print("=====")
+  print(f"Dev data: {all_dev_dataset}")
+
+  return datasets, all_dev_dataset
+
