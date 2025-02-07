@@ -458,10 +458,9 @@ def get_data_seame(debug=False):
 
 
 def get_data_fisher(debug=False):
-	'''
-	 Spanish-English Telephone conversations
-	'''
-
+    '''
+    Spanish-English Telephone conversations
+    '''
     datasets = {}
 
     dev_list = []
@@ -494,9 +493,9 @@ def get_data_fisher(debug=False):
 
 
 def get_data_arzen(debug=False):
-	'''
-	 Arabic-English: spontaneous conversational speech corpus informal interviews, Egyptian-English; Setting: all recordings were carried out in a soundproof room.
-	'''
+    '''
+    Arabic-English: spontaneous conversational speech corpus informal interviews, Egyptian-English; Setting: all recordings were carried out in a soundproof room.
+    '''
     datasets = {}
 
     dev_list = []
@@ -530,20 +529,20 @@ def get_data_ascend(debug=False):
   '''
   datasets = {}
   dev_list = []
-
+  
   print("Loading ASCEND ...")
   ascend_train="ascend_train_notags.stm"
   ascend_dev="ascend_dev_notags.stm"
-
+  
   shuffle_ascend_train_dataset = load_asr_dataset(ascend_train, "zh").shuffle(seed=42)
   ascend_train_dataset = load_asr_dataset(ascend_train, "zh")
   ascend_dev_dataset = load_asr_dataset(ascend_dev, "zh")
-
+  
   datasets["csw_train_dataset"] = shuffle_ascend_train_dataset
   dev_list.append(ascend_dev_dataset)
-
+  
   all_dev_dataset = concatenate_datasets(dev_list)
-
+  
   print(datasets)
   print("==="*20)
   print(dev_list)
