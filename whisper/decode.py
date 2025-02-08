@@ -77,7 +77,7 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path,
         # 3. Merge the LoRA weights into the base model's weights and unload the adapter
         model.merge_and_unload()
 
-    upstream_model = "openai/whisper-large-v3-turbo"
+    upstream_model = model_path #"openai/whisper-large-v3-turbo"
 
     processor = AutoProcessor.from_pretrained(upstream_model)
 
