@@ -501,8 +501,8 @@ def get_data_arzen(debug=False):
     dev_list = []
 
     print("Loading ARZEN...")
-    arzen_train="arzen-train-clip-ntags.stm"
-    arzen_dev = "arzen-dev-clip-ntags.stm"
+    arzen_train="arzen_train-clip-ntags.stm"
+    arzen_dev = "arzen_dev-clip-ntags.stm"
     shuffle_arzen_train_dataset = load_asr_dataset(arzen_train, "ar").shuffle(seed=42)
     arzen_train_dataset = load_asr_dataset(arzen_train, "ar")
     arzen_dev_dataset = load_asr_dataset(arzen_dev, "ar")
@@ -581,4 +581,43 @@ def get_data_talcs(debug=False):
   print(f"Dev data: {all_dev_dataset}")
 
   return datasets, all_dev_dataset
+
+def get_data_tunswitch(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading TunSwitch ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    tunswitch_csw_train = "tunswitch_csw_train.stm"
+    tunswitch_csw_dev = "tunswitch_csw_dev.stm"
+
+    
+    fisher_dev = "fisher_train_cs_dev-transcript.stm"
+    shuffle_tunswitch_csw_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    tunswitch_csw_dev_dataset = load_asr_dataset(tunswitch_csw_dev, "ar")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_tunswitch_csw_train_dataset  #csw_train_dataset
+
+    dev_list.append(tunswitch_csw_dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+    
 
