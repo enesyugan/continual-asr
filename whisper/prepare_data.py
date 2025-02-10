@@ -503,8 +503,8 @@ def get_data_arzen(debug=False):
     dev_list = []
 
     print("Loading ARZEN...")
-    arzen_train = "arzen-train-clip-ntags.stm"
-    arzen_dev = "arzen-dev-clip-ntags.stm"
+    arzen_train = "arzen_train-clip-ntags.stm"
+    arzen_dev = "arzen_dev-clip-ntags.stm"
 
     shuffle_arzen_train_dataset = load_asr_dataset(arzen_train, "ar").shuffle(seed=42)
     arzen_train_dataset = load_asr_dataset(arzen_train, "ar")

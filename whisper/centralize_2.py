@@ -26,57 +26,68 @@ def centralize_and_save(model_path, lora_paths, save_path, save_as_lora=False):
     device = "cpu"
     torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 
-    models_state_dict = []
 
-    for idx, lora_path in enumerate(lora_paths): 
-        base_model = create_whisper_model(model_path, torch_dtype,
-                                 attn_implementation="sdpa", #"flash_attention_2",
-                                 low_cpu_mem_usage=True,
-                                 device_map={"": device})
+    assert len(lora_paths) > 1
+    # models_state_dict = []
+    models = list()
 
-        print(lora_path)
-        lora_weights_path = lora_path
+    base_model = create_whisper_model(model_path, torch_dtype,
+                                      attn_implementation="sdpa",  # "flash_attention_2",
+                                      low_cpu_mem_usage=True,
+                                      device_map={"": device})
+
+    main_model = base_model
+
+    lora_path = lora_paths[0]
+    main_model = PeftModel.from_pretrained(main_model, lora_path)
+    main_model.merge_and_unload()
+
+    for idx, _lora_path in enumerate(lora_paths[1:]):
+
+        sub_model = create_whisper_model(model_path, torch_dtype,
+                                          attn_implementation="sdpa",  # "flash_attention_2",
+                                          low_cpu_mem_usage=True,
+                                          device_map={"": device})
+
+        print(_lora_path)
+        lora_weights_path = _lora_path
 
         # 2. Load the LoRA adapter weights onto the base model
-        model = PeftModel.from_pretrained(base_model, lora_weights_path)
+        sub_model = PeftModel.from_pretrained(sub_model, lora_weights_path)
+        sub_model.merge_and_unload()
 
         # 3. Merge the LoRA weights into the base model's weights and unload the adapter
-        models_state_dict.append(model.state_dict())
-        if idx == 0:
-            centralized_model = copy.deepcopy(model)
+        # models_state_dict.append(model.state_dict())
+        # if idx == 0: centralized_model = copy.deepcopy(model)
 
-    centralized_model_state_dict = copy.deepcopy(models_state_dict[0])
+        for (main_param, param) in zip(main_model.parameters(), sub_model.parameters()):
 
-    # Iterate through the keys (weights) and average them
-    for key in centralized_model_state_dict.keys():
-        centralized_model_state_dict[key] = sum(d[key] for d in models_state_dict) / len(models_state_dict)
+            main_param.data.add_(param.data)
 
-    # Load the averaged weights into the new model
-    centralized_model.load_state_dict(centralized_model_state_dict)
+    n_models = len(lora_paths)
+    for main_param in main_model.parameters():
+        main_param.data.div_(n_models)
 
     if save_as_lora:
-        print(f"Saving centralized LoRA adapter to {save_path}")
-        centralized_model.save_pretrained(save_path)
-        return centralized_model   
-    else: 
-        print("Merging LoRA weights into the base model...")
-        # centralized_model.merge_and_unload()
-     
-        # base_model = create_whisper_model(model_path, torch_dtype,
-        #                          attn_implementation="sdpa", #"flash_attention_2",
-        #                          low_cpu_mem_usage=True,
-        #                          device_map={"": device})
-        #
-        # base_state_dict = base_model.state_dict()
-        #
-        # for key in centralized_model_state_dict.keys():
-        #     if key in base_state_dict:
-        #         base_state_dict[key] += centralized_model_state_dict[key]
-        #
-        # base_model.load_state_dict(base_state_dict)
-        
+        # print(f"Saving centralized LoRA adapter to {save_path}")
+        # centralized_model.save_pretrained(save_path)
+        # return centralized_model
+        raise NotImplementedError
+    else:
         print(f"Saving fully merged model to {save_path}")
         base_model.save_pretrained(save_path)
+
+        from transformers import AutoFeatureExtractor, AutoTokenizer
+
+        original_model_path = model_path
+
+        # Load from the original model's path
+        feature_extractor = AutoFeatureExtractor.from_pretrained(original_model_path)
+        tokenizer = AutoTokenizer.from_pretrained(original_model_path)
+
+        # Save alongside the model
+        feature_extractor.save_pretrained(save_path)
+        tokenizer.save_pretrained(save_path)
 
         return base_model
 
