@@ -30,12 +30,12 @@ sys.path.append('/home/eugan/repos/yapay-net/src/hug/trainer/')
 
 def normalize_text(utterance, language):
     arabic_filter = re.compile(r'[OUM]+/*|\u061F|\?|\!|\.')
-    english_filter = re.compile(r'\(|\)|\#|\+|\=|\?|\!|\;|\,|\"|\:|\.')  #|\.
+    english_filter = re.compile(r'\(|\)|\#|\+|\=|\?|\!|\;|\,|\"|\:|\.')  # |\.
     cyrillic_filter = re.compile(r'\(|\)|\#|\+|\=|\?|\!|\;|\,|\"|\:|\.')
     japanese_filter = re.compile(
         r'\(|\)|\#|\+|\=|\?|\!|\;|\,|\"|\:|\.|\u3002|\u300C|\u300D|\uFF08|\uFF09|\uFF0C|\uFF1F|\uFF01|\uFF1A|\uFF1B')
 
-    #english_filter = re.compile(r'\(|\)|\#|\+|\=|\?|\!|\;|\,|\"|\:')#|\.
+    # english_filter = re.compile(r'\(|\)|\#|\+|\=|\?|\!|\;|\,|\"|\:')#|\.
     if language == "ar":
         return re.subn(arabic_filter, '', utterance)[0].lower()
     elif language == "en" or language == "de" or language == "es" or language == "tr":
@@ -134,9 +134,9 @@ def detect_language(text, mapper):
             return mapper['en']
         else:
             print(f"word: {word}")
-            #print(UNK)
+            # print(UNK)
             return mapper["en"]
-            #return mapper["<unk>"]
+            # return mapper["<unk>"]
 
     tmp = list()
     for word in text.split():
@@ -161,7 +161,8 @@ def load_asr_dataset(file_path, language):
         parts = line.strip().split('\t')
         if len(parts) < 6:
             # print(line)
-            skipped += 1; continue
+            skipped += 1;
+            continue
         try:
             uid, wavpath, start, end, duration, transcript = parts
         except Exception as e:
@@ -186,22 +187,22 @@ def load_asr_dataset(file_path, language):
         language_str = ",".join(language)
 
         if csw:
-            #print(line)
+            # print(line)
             language_ids = detect_language(transcript, mapper_orig)
             lang_mix_id = -100
         else:
-            #print(ENES)
+            # print(ENES)
             lang_mix_id = mapper_orig[language[0]]
             language_ids = [mapper_orig[language[0]] for _ in transcript.split()]
 
-        #if len(parts) >= 3:  # Assuming at least 5 columns in STM file
-        #transcript = "<|startoftranscript|><|{}|><|transcribe|><|notimestamps|> {}<|endoftext|>".format(language[0],transcript)
+        # if len(parts) >= 3:  # Assuming at least 5 columns in STM file
+        # transcript = "<|startoftranscript|><|{}|><|transcribe|><|notimestamps|> {}<|endoftext|>".format(language[0],transcript)
         transcript = "<|startoftranscript|><|{}|><|transcribe|><|notimestamps|> {}<|endoftext|>".format(language[0],
                                                                                                         transcript)
 
         data.append({
-            #'audio': audio.raw_data,
-            #'audio_path': parts[0],
+            # 'audio': audio.raw_data,
+            # 'audio_path': parts[0],
             'uid': uid,
             'audio': wavpath,
             'transcript': transcript,
@@ -212,15 +213,15 @@ def load_asr_dataset(file_path, language):
             'language_ids': language_ids,
             'lang_mix_id': lang_mix_id,
         })
-        #print(language_ids)
+        # print(language_ids)
 
     # Create a Hugging Face Dataset
     dataset = Dataset.from_list(data)
     print(dataset)
     dataset = dataset.cast_column("audio", Audio(sampling_rate=16000))
-    #print(dataset[0]["audio"])
-    #print(type(dataset[0]["audio"]["array"]))
-    #print(ASD)
+    # print(dataset[0]["audio"])
+    # print(type(dataset[0]["audio"]["array"]))
+    # print(ASD)
     # for el in dataset:
     #     print(el)
     # print(AD)
@@ -294,7 +295,7 @@ def do_csw_backup(train_list, pseudo_csw_amount, train=True):
             random_entry = random_dataset[random.randint(0, len(random_dataset) - 1)]
             new_duration = random_entry["duration"]
             while (duration + new_duration > 15000 and i == 0) or (duration + new_duration > 20000 and i == 1):
-                #print("{}+{}={}".format(duration, new_duration, duration+new_duration))
+                # print("{}+{}={}".format(duration, new_duration, duration+new_duration))
                 random_dataset = data_list[random.randint(0, len(data_list) - 1)]
                 random_entry = random_dataset[random.randint(0, len(random_dataset) - 1)]
                 new_duration = random_entry["duration"]
@@ -332,6 +333,7 @@ def do_csw_backup(train_list, pseudo_csw_amount, train=True):
     print("EXcced: 20: {} 30: {}".format(duration_20, duration_30))
     pbar.close()
     return csw_dataset
+
 
 #
 # def get_data(debug=False):
@@ -477,7 +479,7 @@ def get_data_fisher(debug=False):
 
     fisher_all_train_dataset = concatenate_datasets([shuffle_fisher_train_dataset, shuffle_fisher_mono_train_dataset])
 
-    datasets["csw_train_dataset"] = fisher_all_train_dataset  #csw_train_dataset
+    datasets["csw_train_dataset"] = fisher_all_train_dataset  # csw_train_dataset
 
     dev_list.append(fisher_dev_dataset)
     all_dev_dataset = concatenate_datasets(dev_list)
@@ -501,7 +503,7 @@ def get_data_arzen(debug=False):
     dev_list = []
 
     print("Loading ARZEN...")
-    arzen_train="arzen-train-clip-ntags.stm"
+    arzen_train = "arzen-train-clip-ntags.stm"
     arzen_dev = "arzen-dev-clip-ntags.stm"
     shuffle_arzen_train_dataset = load_asr_dataset(arzen_train, "ar").shuffle(seed=42)
     arzen_train_dataset = load_asr_dataset(arzen_train, "ar")
@@ -521,64 +523,64 @@ def get_data_arzen(debug=False):
 
     return datasets, all_dev_dataset
 
+
 def get_data_ascend(debug=False):
-  '''
+    '''
   A Spontanenous Chinese-English from Hong Kong conversations about different topics; Setting: The recordings are made in a quiet classroom.
   Both speakers are seated across one another at a distance of ∼1 meter. Each speaker is equipped with a RODE SmartLav+ clip microphone as the recording device.
   The microphone is mounted on the speaker’s shirt collar.
   '''
-  datasets = {}
-  dev_list = []
-  
-  print("Loading ASCEND ...")
-  ascend_train="ascend_train_notags.stm"
-  ascend_dev="ascend_dev_notags.stm"
-  
-  shuffle_ascend_train_dataset = load_asr_dataset(ascend_train, "zh").shuffle(seed=42)
-  ascend_train_dataset = load_asr_dataset(ascend_train, "zh")
-  ascend_dev_dataset = load_asr_dataset(ascend_dev, "zh")
-  
-  datasets["csw_train_dataset"] = shuffle_ascend_train_dataset
-  dev_list.append(ascend_dev_dataset)
-  
-  all_dev_dataset = concatenate_datasets(dev_list)
-  
-  print(datasets)
-  print("==="*20)
-  print(dev_list)
+    datasets = {}
+    dev_list = []
 
-  print("=====")
-  print(f"Dev data: {all_dev_dataset}")
+    print("Loading ASCEND ...")
+    ascend_train = "ascend_train_notags.stm"
+    ascend_dev = "ascend_dev_notags.stm"
 
-  return datasets, all_dev_dataset
+    shuffle_ascend_train_dataset = load_asr_dataset(ascend_train, "zh").shuffle(seed=42)
+    ascend_train_dataset = load_asr_dataset(ascend_train, "zh")
+    ascend_dev_dataset = load_asr_dataset(ascend_dev, "zh")
+
+    datasets["csw_train_dataset"] = shuffle_ascend_train_dataset
+    dev_list.append(ascend_dev_dataset)
+
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
 
 
 def get_data_talcs(debug=False):
-  '''
+    '''
   Spontaneous; Real online one-to-one English teaching Mandarin-English only teachers; different regions of China; Setting: recorded by the personal computer microphone
   '''
-  datasets = {}
-  dev_list = []
+    datasets = {}
+    dev_list = []
 
-  print("Loading TALCS ...")
-  talcs_train = "talcs_train_time.stm"
-  talcs_dev = "talcs_dev_time.stm"
+    print("Loading TALCS ...")
+    talcs_train = "talcs_train_time.stm"
+    talcs_dev = "talcs_dev_time.stm"
 
-  shuffle_talcs_train_dataset = load_asr_dataset(talcs_train, "zh").shuffle(seed=42)
-  talcs_train_dataset = load_asr_dataset(talcs_train, "zh")
-  talcs_dev_dataset = load_asr_dataset(talcs_dev, "zh")
+    shuffle_talcs_train_dataset = load_asr_dataset(talcs_train, "zh").shuffle(seed=42)
+    talcs_train_dataset = load_asr_dataset(talcs_train, "zh")
+    talcs_dev_dataset = load_asr_dataset(talcs_dev, "zh")
 
-  datasets["csw_train_dataset"] = shuffle_talcs_train_dataset
-  dev_list.append(talcs_dev_dataset)
+    datasets["csw_train_dataset"] = shuffle_talcs_train_dataset
+    dev_list.append(talcs_dev_dataset)
 
-  all_dev_dataset = concatenate_datasets(dev_list)
+    all_dev_dataset = concatenate_datasets(dev_list)
 
-  print(datasets)
-  print("==="*20)
-  print(dev_list)
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
 
-  print("=====")
-  print(f"Dev data: {all_dev_dataset}")
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
 
-  return datasets, all_dev_dataset
-
+    return datasets, all_dev_dataset

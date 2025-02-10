@@ -1,8 +1,11 @@
+import copy
+
 import evaluate
 import sacrebleu
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 import torch.multiprocessing as mp
+from peft import PeftModel
 
 mp.set_start_method('spawn', force=True)
 import os
@@ -54,7 +57,7 @@ def split_dataset(dataset, num_chunks):
 
 def load_model_and_decode(rank, dataset_split, model_path, lora_path,
                           device_id, batch_size, beam_size, total_samples,
-                          no_progress_bar, result_queue):
+                          no_progress_bar, lora_weights, result_queue):
     """Loads model on specific GPU and decodes its chunk."""
     torch.cuda.set_device(device_id)
 
@@ -67,15 +70,53 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path,
                                  device_map={"": device})
 
     if lora_path is not None and len(lora_path) > 0:
-        print("[INFO] Loading LORA weights from {}".format(lora_path))
-        from peft import PeftModel
-        lora_weights_path = lora_path
 
-        # 2. Load the LoRA adapter weights onto the base model
-        model = PeftModel.from_pretrained(model, lora_weights_path)
+        lora_paths = lora_path.split("|")
+        main_model = model
 
-        # 3. Merge the LoRA weights into the base model's weights and unload the adapter
-        model.merge_and_unload()
+        print("[INFO] Loading LORA weights from {}".format(lora_paths[0]))
+        main_model = PeftModel.from_pretrained(main_model, lora_paths[0])
+        main_model.merge_and_unload()
+        # checkpoint = main_model.state_dict()
+
+        if len(lora_weights) > 0:
+            lora_weights = [float(x) for x in lora_weights.split("|")]
+
+            assert len(lora_weights) >= len(lora_paths)
+            lora_weights = lora_weights[:len(lora_paths)]
+
+            _sum = sum(lora_weights)
+            for i in range(len(lora_weights)):
+                lora_weights[i] = lora_weights[i] / _sum
+        else:
+            lora_weights = [1/len(lora_paths)] * len(lora_paths)
+
+        if len(lora_paths) > 1:
+
+            # averaging the parameters
+
+            for _idx, _lora_path in enumerate(lora_paths[1:]):
+                new_model = create_whisper_model(model_path, torch_dtype,
+                                                 attn_implementation="flash_attention_2",
+                                                 low_cpu_mem_usage=True,
+                                                 device_map={"": device})
+
+                print("[INFO] Loading LORA weights from {}".format(_lora_path))
+
+                new_model = PeftModel.from_pretrained(new_model, _lora_path)
+                new_model.merge_and_unload()
+
+                for (main_param, param) in zip(main_model.parameters(), new_model.parameters()):
+
+                    if _idx == 0:
+                        main_param.data.mul_(lora_weights[0]).add_(param.data.mul_(lora_weights[1 + _idx]))
+                    else:
+                        main_param.data.add_(param.data.mul_(lora_weights[1 + _idx]))
+
+            # for main_param in main_model.parameters():
+            #     main_param.data.div_(len(lora_paths))
+
+        model = main_model
 
     upstream_model = "openai/whisper-large-v3-turbo"
 
@@ -214,6 +255,9 @@ if __name__ == "__main__":
     parser.add_argument('-no_progress_bar', action='store_true',
                         help="Use spec augmentation")
 
+    parser.add_argument('-lora_weights', required=False, default="", type=str,
+                        help="Efficients for each lora set")
+
     args = parser.parse_args()
 
     test_path = args.test_stm
@@ -237,14 +281,16 @@ if __name__ == "__main__":
         for gpu_id in range(num_gpus):
             process = mp.Process(target=load_model_and_decode,
                                  args=(gpu_id, dataset_chunks[gpu_id], args.model_path, args.lora_path,
-                                       gpu_id, args.batch_size, args.beam_size, total_size, args.no_progress_bar,
+                                       gpu_id, args.batch_size, args.beam_size, total_size,
+                                       args.no_progress_bar, args.lora_weights,
                                        result_queue))
             process.start()
             processes.append(process)
 
     else:
         load_model_and_decode(0, test_dataset, args.model_path, args.lora_path,
-                              0, args.batch_size, args.beam_size, total_size, args.no_progress_bar, result_queue)
+                              0, args.batch_size, args.beam_size, total_size,
+                              args.no_progress_bar, args.lora_weights, result_queue)
 
     # Collect results
     final_results = []
@@ -286,7 +332,7 @@ if __name__ == "__main__":
 
         f.write("WER: {}\n".format(wer_error))
         f.write("CER: {}\n".format(cer_error))
-        print("WER: {}".format(wer_error)) 
+        print("WER: {}".format(wer_error))
         print("CER: {}".format(cer_error))
 
     out = jiwer.process_words(target_lst,
@@ -301,4 +347,3 @@ if __name__ == "__main__":
     # , reference_transform=jiwer.wer_standardize, hypothesis_transform=jiwer.wer_standardize)
     with open(os.path.join(outdir, "c.eval.txt"), "w") as f:
         f.write(jiwer.visualize_alignment(out))
-

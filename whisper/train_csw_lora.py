@@ -69,6 +69,8 @@ parser.add_argument('-gradient_accumulation', type=int, default=2,
 
 parser.add_argument('-attn_implementation', type=str, default="flash_attention_2",
                     help='Whisper Model size: ["flash_attention_2", "sdpa", "manual"')
+parser.add_argument('-weight_decay', type=float, default=0.0005 ,
+                    help="""Label smoothing""")
 args = parser.parse_args()
 
 # TODO: add option to
@@ -240,7 +242,7 @@ warmup_steps = args.warmup_steps
 optimizer = torch.optim.AdamW(
     params=model.parameters(),
     lr=learning_rate,
-    weight_decay=0.0005
+    weight_decay=args.weight_decay  # 0.0005
 )
 
 # lr_scheduler = get_inverse_sqrt_schedule(
