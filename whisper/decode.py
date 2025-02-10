@@ -118,7 +118,7 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path,
 
         model = main_model
 
-    upstream_model = "openai/whisper-large-v3-turbo"
+    upstream_model = model_path #"openai/whisper-large-v3-turbo"
 
     processor = AutoProcessor.from_pretrained(upstream_model)
 

@@ -47,6 +47,8 @@ parser.add_argument('-low_rank_modules', type=str, default="qv",
                     help='Whisper Model size: ["qv", "all-linear"')
 parser.add_argument('-dataset', required=True,
                     help="Path to the dataset in huggingface format")
+parser.add_argument('-checkpoint_path', default="",
+                    help="Path to model checkpoint to be loaded")
 parser.add_argument('-learning_rate', type=float, default=0.001,
                     help="""Peak learning rate. If adagrad/adadelta/adam is
                     used, then this is the global learning rate. Recommended
@@ -74,7 +76,7 @@ parser.add_argument('-weight_decay', type=float, default=0.0005 ,
 args = parser.parse_args()
 
 # TODO: add option to
-if args.dataset == 'seame':
+if args.dataset.lower() == 'seame':
     from prepare_data import get_data_seame
 
     all_tr_dataset, all_dev_dataset = get_data_seame(debug=False)
@@ -82,7 +84,7 @@ if args.dataset == 'seame':
     print("DEV data: {}".format(all_dev_dataset))
     training_uid_mapper = None
     dev_uid_mapper = None
-elif args.dataset == 'fisher':
+elif args.dataset.lower() == 'fisher':
     from prepare_data import get_data_fisher
 
     all_tr_dataset, all_dev_dataset = get_data_fisher(debug=False)
@@ -90,7 +92,7 @@ elif args.dataset == 'fisher':
     print("DEV data: {}".format(all_dev_dataset))
     training_uid_mapper = None
     dev_uid_mapper = None
-elif args.dataset == 'arzen':
+elif args.dataset.lower() == 'arzen':
     from prepare_data import get_data_arzen
 
     all_tr_dataset, all_dev_dataset = get_data_arzen(debug=False)
@@ -98,7 +100,7 @@ elif args.dataset == 'arzen':
     print("DEV data: {}".format(all_dev_dataset))
     training_uid_mapper = None
     dev_uid_mapper = None
-elif args.dataset == 'ascend':
+elif args.dataset.lower() == 'ascend':
     from prepare_data import get_data_ascend
 
     all_tr_dataset, all_dev_dataset = get_data_ascend(debug=False)
@@ -106,10 +108,18 @@ elif args.dataset == 'ascend':
     print("DEV data: {}".format(all_dev_dataset))
     training_uid_mapper = None
     dev_uid_mapper = None
-elif args.dataset == 'talcs':
+elif args.dataset.lower() == 'talcs':
     from prepare_data import get_data_talcs
 
     all_tr_dataset, all_dev_dataset = get_data_talcs(debug=False)
+    print("Training data: {}".format(all_tr_dataset))
+    print("DEV data: {}".format(all_dev_dataset))
+    training_uid_mapper = None
+    dev_uid_mapper = None
+elif args.dataset.lower() == 'tunswitch':
+    from prepare_data import get_data_tunswitch
+
+    all_tr_dataset, all_dev_dataset = get_data_tunswitch(debug=False)
     print("Training data: {}".format(all_tr_dataset))
     print("DEV data: {}".format(all_dev_dataset))
     training_uid_mapper = None
@@ -147,7 +157,7 @@ if args.model_size == "large":
 else:
     model_name = "openai/whisper-small"
 
-checkpoint_path = model_name
+checkpoint_path = model_name if args.checkpoint_path == "" else args.checkpoint_path
 
 processor = AutoProcessor.from_pretrained(model_name)
 
