@@ -71,8 +71,23 @@ parser.add_argument('-gradient_accumulation', type=int, default=2,
 
 parser.add_argument('-attn_implementation', type=str, default="flash_attention_2",
                     help='Whisper Model size: ["flash_attention_2", "sdpa", "manual"')
-parser.add_argument('-weight_decay', type=float, default=0.0005 ,
+parser.add_argument('-weight_decay', type=float, default=0.0005,
                     help="""Label smoothing""")
+
+parser.add_argument('-ema', action='store_true',
+                    help="Use exponential moving average during training")
+parser.add_argument('-ema_rate', type=float, default=0.9
+                    , help='Dropout value of the model')
+
+parser.add_argument('-teacher_distillation', type=float, default=0
+                    , help='Use the original Whisper model as a teacher')
+
+parser.add_argument('-optim', type=str, default="adam",
+                    help='Optimizer: ["adam", "rmsprop", "sgd".')
+
+parser.add_argument('-freeze_embedding', action='store_true',
+                    help="Use exponential moving average during training")
+
 args = parser.parse_args()
 
 # TODO: add option to
@@ -173,6 +188,12 @@ print("pad_token_id: {}".format(model.config.pad_token_id))
 
 print(model)
 
+if args.freeze_embedding:
+    model.proj_out.weight.requires_grad = False
+    if model.proj_out.bias is not None:
+        model.proj_out.bias.requires_grad = False
+    model.model.decoder.embed_tokens.weight.requires_grad = False
+
 if args.low_rank_modules == "qv":
 
     lora_target_modules = ["q_proj", "v_proj"]
@@ -184,76 +205,193 @@ elif args.low_rank_modules == "all-linear":
 else:
     raise NotImplementedError
 
-if args.low_rank_type == "lora":
-    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
-                             bias="none")  # , modules_to_save=["pre_proj_out"])
-elif args.low_rank_type == "pissa":
-    """
-    PiSSA initializes the LoRA adapter using the principal singular values and singular vectors
-    """
-    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
-                             init_lora_weights="pissa",
-                             lora_dropout=0.05,
-                             bias="none")  # , modules_to_save=["pre_proj_out"])
+if len(args.low_rank_type) > 0:
+    if args.low_rank_type == "lora":
+        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
+                                 bias="none")  # , modules_to_save=["pre_proj_out"])
+    elif args.low_rank_type == "pissa":
+        """
+        PiSSA initializes the LoRA adapter using the principal singular values and singular vectors
+        """
+        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+                                 init_lora_weights="pissa",
+                                 lora_dropout=0.05,
+                                 bias="none")  # , modules_to_save=["pre_proj_out"])
 
-elif args.low_rank_type == "olora":
-    """
-    Olora: QR decomposition to initialize the LoRA adapters. OLoRA translates the base weights of the model by a factor of their QR decompositions, 
-    i.e., it mutates the weights before performing any training on them
-    """
+    elif args.low_rank_type == "olora":
+        """
+        Olora: QR decomposition to initialize the LoRA adapters. OLoRA translates the base weights of the model by a factor of their QR decompositions, 
+        i.e., it mutates the weights before performing any training on them
+        """
 
-    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
-                             init_lora_weights="olora",
-                             lora_dropout=0.05,
-                             bias="none")  # , modules_to_save=["pre_proj_out"])
+        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+                                 init_lora_weights="olora",
+                                 lora_dropout=0.05,
+                                 bias="none")  # , modules_to_save=["pre_proj_out"])
 
-elif args.low_rank_type == "eva":
+    elif args.low_rank_type == "eva":
 
-    """
-    EVA performs SVD on the input activations of each layer and uses the right-singular vectors to initialize LoRA weights
-    """
-    from peft import EvaConfig
+        """
+        EVA performs SVD on the input activations of each layer and uses the right-singular vectors to initialize LoRA weights
+        """
+        from peft import EvaConfig
 
-    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
-                             init_lora_weights="eva",
-                             eva_config=EvaConfig(rho=2.0),
-                             lora_dropout=0.05,
-                             bias="none")  # , modules_to_save=["pre_proj_out"])
+        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+                                 init_lora_weights="eva",
+                                 eva_config=EvaConfig(rho=2.0),
+                                 lora_dropout=0.05,
+                                 bias="none")  # , modules_to_save=["pre_proj_out"])
 
-elif args.low_rank_type == "rslora":
+    elif args.low_rank_type == "rslora":
 
-    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
-                             use_rslora=True,
-                             lora_dropout=0.05,
-                             bias="none")  # , modules_to_save=["pre_proj_out"])
+        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+                                 use_rslora=True,
+                                 lora_dropout=0.05,
+                                 bias="none")  # , modules_to_save=["pre_proj_out"])
 
-elif args.low_rank_type == "dora":
-    """
-    decomposes the updates of the weights into two parts, magnitude and direction. 
-    Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter
-    """
+    elif args.low_rank_type == "dora":
+        """
+        decomposes the updates of the weights into two parts, magnitude and direction. 
+        Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter
+        """
 
-    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
-                             use_dora=True,
-                             lora_dropout=0.05,
-                             bias="none")  # , modules_to_save=["pre_proj_out"])
+        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+                                 use_dora=True,
+                                 lora_dropout=0.05,
+                                 bias="none")  # , modules_to_save=["pre_proj_out"])
 
+    else:
+        raise NotImplementedError
+
+    model.add_adapter(lora_config)
 else:
-    raise NotImplementedError
+    # nothing happens
+    model.proj_out.weight = model.model.decoder.embed_tokens.weight
+    # original_save_pretrained = model.save_pretrained
 
-model.add_adapter(lora_config)
+    # def patched_save_pretrained(*args, **kwargs):
+    #     model.model.proj_out.weight = model.model.decoder.embed_tokens.weight
+    #     return original_save_pretrained(*args, **kwargs)
+    #
+    # model.save_pretrained = patched_save_pretrained
+    # # model.save_pretrained("my_model_path")
+
+    pass
+
 
 count_parameters(model)
+
+if args.teacher_distillation > 0:
+    print("[INFO] Using the Whisper model as a teacher")
+    # actually student and teacher can be the same xD
+    teacher = create_whisper_model(model_name, torch_dtype, attn_implementation="flash_attention_2",
+                                   low_cpu_mem_usage=True,
+                                   device_map={"": device})
+
+    # freeze the parameters for the teacher
+    for param in teacher.parameters():
+        param.requires_grad = False
+
+    teacher.config.forced_decoder_ids = None
+    teacher.config.suppress_tokens = []
+    teacher.config.use_cache = False  # importante
+
+    model.teacher = teacher
+    model.teacher_distillation = args.teacher_distillation
+
+else:
+    teacher = None
 
 # learning_rate = 1e-3
 learning_rate = args.learning_rate
 warmup_steps = args.warmup_steps
 
-optimizer = torch.optim.AdamW(
-    params=model.parameters(),
-    lr=learning_rate,
-    weight_decay=args.weight_decay  # 0.0005
-)
+if args.optim in ['adam', 'adamw']:
+
+    optimizer = torch.optim.AdamW(
+        params=model.parameters(),
+        lr=learning_rate,
+        weight_decay=args.weight_decay  # 0.0005
+    )
+
+elif args.optim in ['sgd']:
+
+    optimized_params = model.parameters()
+
+    if args.ema:
+
+        class EMASGD(torch.optim.SGD):
+
+            def __init__(self, params, ema_rate, **kwargs):
+                super().__init__(params, **kwargs)
+                self.ema_rate = ema_rate
+                self.counter = 0
+                # self.shadow_weights = {id(p): p.clone().detach() for group in self.param_groups for p in group[
+                # 'params']}
+                self.shadow_weights = dict()
+
+                for group in self.param_groups:
+                    for p in group['params']:
+                        self.shadow_weights[id(p)] = p.data.new_zeros(p.size())
+                        self.shadow_weights[id(p)].add_(p.data)
+
+            def step(self, closure=None):
+                """
+                Performs a single optimization step and updates EMA weights.
+                """
+                # Perform the base SGD step
+                loss = super().step(closure)
+                self.counter += 1
+
+                alpha = (1 / self.counter) * self.ema_rate
+                # alpha = max(0.01, min(alpha, 0.5))
+                # alpha = 1 - self.ema_rate
+
+                total = 0
+                # Update EMA weights
+                with torch.no_grad():
+                    for group in self.param_groups:
+                        for p in group['params']:
+                            if p.requires_grad:
+                                param_id = id(p)
+                                if param_id in self.shadow_weights:
+
+                                    if p.device != self.shadow_weights[param_id].device:
+                                        self.shadow_weights[param_id] = self.shadow_weights[param_id].to(p.device)
+                                    # print("[DEBUGGING] alpha:", alpha)
+                                    # print("[DEBUGGING] BEFORE")
+
+                                    # w_sum = p.data.sum().item()
+                                    # sw_sum = self.shadow_weights[param_id].sum().item()
+                                    #
+                                    # if w_sum != sw_sum:
+                                    #     print(f"p.data sum: {w_sum}, "
+                                    #           f"shadow_weights sum: {sw_sum}")
+                                    p.data.mul_(alpha).add_(self.shadow_weights[param_id] * (1 - alpha))
+                                    # w_sum = p.data.sum().item()
+                                    # sw_sum = self.shadow_weights[param_id].sum().item()
+                                    #
+                                    # if w_sum != sw_sum:
+                                    #     # print("[DEBUGGING] AFTER")
+                                    #     print(f"p.data sum: {w_sum}, "
+                                    #           f"shadow_weights sum: {sw_sum}")
+                                    #
+                                    #     total += p.data.numel()
+                                    # print("---")
+
+                                    self.shadow_weights[param_id].copy_(p.data)
+
+                # print("Total number of EMA-updated params:", total)
+
+                return loss
+
+
+        optimizer = EMASGD(optimized_params, ema_rate=args.ema_rate, weight_decay=args.weight_decay,
+                           lr=args.learning_rate)
+
+    else:
+        optimizer = torch.optim.SGD(model.parameters,
+                                    lr=args.learning_rate)
 
 # lr_scheduler = get_inverse_sqrt_schedule(
 #     optimizer=optimizer,
@@ -269,7 +407,12 @@ elif args.lr_scheduler == 'cosine':
 else:
     raise NotImplementedError
 
-output_dir = "outputs/model_%s_%s_%s_%s" % (args.model_size, args.dataset, args.low_rank_type, args.low_rank_modules)
+if not args.ema:
+    output_dir = "outputs/model_%s_%s_%s_%s" % (
+        args.model_size, args.dataset, args.low_rank_type, args.low_rank_modules)
+else:
+    output_dir = "outputs_ema/model_%s_%s" % (
+        args.model_size, args.dataset)
 
 # TODO: logging_dir
 training_args = Seq2SeqTrainingArguments(
