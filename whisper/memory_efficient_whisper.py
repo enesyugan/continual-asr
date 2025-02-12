@@ -364,6 +364,11 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
             labels = labels.to(lm_logits.device).reshape(-1)
             logits = lm_logits.view(-1, self.config.vocab_size)
             label_smoothing = self.label_smoothing if self.training else 0.0
+            bsz = labels.size(0)
+
+            ignore_index = -100
+            mask = labels.ne(ignore_index)
+            total = mask.float().sum()
 
             if fast_xentropy:
 
@@ -372,10 +377,13 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
                                         label_smoothing,  # smoothing
                                         -100,  # padding
                                         half_to_float)
-                bsz = labels.size(0)
-                loss = loss.sum().div(bsz)
+
+                loss = loss.sum().div(total)
                 ce_loss = loss
             else:
+                # note: these are the default values in pytorch/huggingface.
+                # they are
+
                 loss_fct = CrossEntropyLoss(ignore_index=-100,
                                             reduction='mean',
                                             label_smoothing=label_smoothing)
@@ -384,12 +392,31 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
                 ce_loss = loss
 
             if teacher_lm_logits is not None:
-                distilled_loss = torch.nn.functional.mse_loss(logits.view(-1, logits.size(-1)),
-                                                              teacher_lm_logits.view(-1, logits.size(-1)),
-                                                              reduction='none')
-                distilled_loss = distilled_loss.sum().div(bsz)
 
-                loss = ce_loss + self.teacher_distillation * distilled_loss
+                # kl divergence loss
+                log_probs = F.log_softmax(logits, dim=-1, dtype=torch.float32)
+                teacher_log_probs = F.log_softmax(teacher_lm_logits.view(-1, self.config.vocab_size),
+                                                  dim=-1, dtype=torch.float32)
+
+                distilled_loss = F.kl_div(log_probs, teacher_log_probs, reduction='none', log_target=True)
+
+                # Sum over the class dimension (H) to get loss per token.
+                distilled_loss = distilled_loss.sum(dim=-1)
+
+                # 5. Average the loss only over the valid tokens.
+                float_mask = mask.float()
+                distilled_loss = distilled_loss * float_mask
+
+                distilled_loss = distilled_loss.sum().div(total)
+
+                # n_features = distilled_loss.size(-1)
+                # # masked positions are zeros
+                #
+                # # sum on the feature dimension, and then mask the masked positions
+                # distilled_loss = distilled_loss.sum(2) * decoder_attention_mask.float()
+                # distilled_loss = distilled_loss.sum().div(n_features).div(bsz)
+
+                loss = (1 - self.teacher_distillation) + ce_loss + self.teacher_distillation * distilled_loss
             else:
                 distilled_loss = 0
 

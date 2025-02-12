@@ -3,6 +3,7 @@ import sys
 import re
 import warnings
 import argparse
+import math
 
 from datasets import load_dataset, ClassLabel, Features, Value, Dataset, Audio, concatenate_datasets, \
     interleave_datasets
@@ -86,6 +87,9 @@ parser.add_argument('-optim', type=str, default="adam",
                     help='Optimizer: ["adam", "rmsprop", "sgd".')
 
 parser.add_argument('-freeze_embedding', action='store_true',
+                    help="Use exponential moving average during training")
+
+parser.add_argument('-disable_safetensors', action='store_true',
                     help="Use exponential moving average during training")
 
 args = parser.parse_args()
@@ -343,9 +347,25 @@ elif args.optim in ['sgd']:
                 loss = super().step(closure)
                 self.counter += 1
 
-                alpha = (1 / self.counter) * self.ema_rate
+                # alpha is the weight assigned to the current parameters
+                # higher = learning, lower = not learning
+
+                # at the start of training, we want to have high alpha
+                # so it should be
+                # alpha = (1 / self.counter) * self.ema_rate
+
+
                 # alpha = max(0.01, min(alpha, 0.5))
                 # alpha = 1 - self.ema_rate
+
+                # alpha = 1.0 * math.exp(-self.ema_rate * self.counter)
+                #
+                # alpha_min = 0.0001
+                # alpha = alpha_min + (1.0 - alpha_min) * math.exp(-self.ema_rate * self.counter)
+
+                # follow the same equation in the Rehearsal Free paper
+
+                alpha = 1 / self.counter
 
                 total = 0
                 # Update EMA weights
@@ -450,6 +470,7 @@ training_args = Seq2SeqTrainingArguments(
     remove_unused_columns=False,
     label_names=["labels"],
     disable_tqdm=args.no_progress_bar,
+    save_safetensors=not args.disable_safetensors
     # push_to_hub=True,
 )
 
@@ -478,9 +499,10 @@ early_stopping = EarlyStoppingCallback(
 
 
 class LoadFullModelCallback(TrainerCallback):
-    def on_train_end(self, args, state, control, model=None, **kwargs):
-        if args.load_best_model_at_end and state.best_model_checkpoint:
+    def on_train_end(self, _args, state, control, model=None, **kwargs):
+        if _args.load_best_model_at_end and state.best_model_checkpoint and len(args.low_rank_type) > 0:
             print(f"Loading best model from {state.best_model_checkpoint}")
+
             model = PeftModel.from_pretrained(model, state.best_model_checkpoint)
             model.save_pretrained(state.best_model_checkpoint, save_adapter=False)
 

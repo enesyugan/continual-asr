@@ -55,7 +55,7 @@ def split_dataset(dataset, num_chunks):
 #     return [DataLoader(chunk, batch_size=batch_size, shuffle=False, num_workers=4) for chunk in dataset_chunks]
 
 
-def load_model_and_decode(rank, dataset_split, model_path, lora_path,
+def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_path,
                           device_id, batch_size, beam_size, total_samples,
                           no_progress_bar, lora_weights, result_queue):
     """Loads model on specific GPU and decodes its chunk."""
@@ -118,7 +118,10 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path,
 
         model = main_model
 
-    upstream_model = model_path #"openai/whisper-large-v3-turbo"
+    if len(tokenizer_path) > 0:
+        upstream_model = tokenizer_path #"openai/whisper-large-v3-turbo"
+    else:
+        upstream_model = model_path
 
     processor = AutoProcessor.from_pretrained(upstream_model)
 
@@ -237,6 +240,8 @@ if __name__ == "__main__":
 
     parser.add_argument('-model_path', required=True, default="", type=str,
                         help="Path to the model checkpoint")
+    parser.add_argument('-tokenizer_path', required=False, default="", type=str,
+                        help="Path to the tokenizer (provided if the model checkpoint doesn't have)")
     parser.add_argument('-lora_path', required=False, default="", type=str,
                         help="Path to the model checkpoint")
     parser.add_argument('-test_stm', required=True, default="test_length.cl_lc.stm",
@@ -280,7 +285,8 @@ if __name__ == "__main__":
         processes = []
         for gpu_id in range(num_gpus):
             process = mp.Process(target=load_model_and_decode,
-                                 args=(gpu_id, dataset_chunks[gpu_id], args.model_path, args.lora_path,
+                                 args=(gpu_id, dataset_chunks[gpu_id],
+                                       args.model_path, args.lora_path, args.tokenizer_path,
                                        gpu_id, args.batch_size, args.beam_size, total_size,
                                        args.no_progress_bar, args.lora_weights,
                                        result_queue))
@@ -288,7 +294,7 @@ if __name__ == "__main__":
             processes.append(process)
 
     else:
-        load_model_and_decode(0, test_dataset, args.model_path, args.lora_path,
+        load_model_and_decode(0, test_dataset, args.model_path, args.lora_path, args.tokenizer_path,
                               0, args.batch_size, args.beam_size, total_size,
                               args.no_progress_bar, args.lora_weights, result_queue)
 
