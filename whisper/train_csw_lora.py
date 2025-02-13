@@ -48,6 +48,10 @@ parser.add_argument('-low_rank_modules', type=str, default="qv",
                     help='Whisper Model size: ["qv", "all-linear"')
 parser.add_argument('-dataset', required=True,
                     help="Path to the dataset in huggingface format")
+
+parser.add_argument('-output_dir', default="outputs",
+                    help="Path to model checkpoint to be loaded")
+
 parser.add_argument('-checkpoint_path', default="",
                     help="Path to model checkpoint to be loaded")
 parser.add_argument('-learning_rate', type=float, default=0.001,
@@ -427,12 +431,9 @@ elif args.lr_scheduler == 'cosine':
 else:
     raise NotImplementedError
 
-if not args.ema:
-    output_dir = "outputs/model_%s_%s_%s_%s" % (
-        args.model_size, args.dataset, args.low_rank_type, args.low_rank_modules)
-else:
-    output_dir = "outputs_ema/model_%s_%s" % (
-        args.model_size, args.dataset)
+output_dir = args.output_dir + "/model_%s_%s_%s_%s" % (
+    args.model_size, args.dataset, args.low_rank_type, args.low_rank_modules)
+
 
 # TODO: logging_dir
 training_args = Seq2SeqTrainingArguments(
