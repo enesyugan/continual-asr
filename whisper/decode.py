@@ -143,7 +143,6 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
         print(f"Set target lang:{tgt_lang} id: {tgt_lang_id}")
         forced_decoder_ids.append([1, tgt_lang_id])
 
-    forced_decoder_ids.append(model.generation_config.forced_decoder_ids[0])
     forced_decoder_ids.append([2, transcribe_id])
     forced_decoder_ids.append([3, notimestamps_id])
 
