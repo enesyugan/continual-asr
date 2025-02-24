@@ -347,12 +347,21 @@ elif args.low_rank_modules == "all-linear":
 else:
     raise NotImplementedError
 
-print(f"EEEEE: {len(args.low_rank_type)}")
-print(ASD)
 if len(args.low_rank_type) > 0:
-    if args.low_rank_type == "lora":
+    if args.low_rank_type == "full_ft":
+        """
+        Full Fine-Tuning: No adapters are used, and the entire model is fine-tuned.
+        """
+        print("Performing full fine-tuning: No adapters will be added.")
+        # Ensure that all model parameters are trainable
+        for param in model.parameters():
+            param.requires_grad = True
+
+    elif args.low_rank_type == "lora":
         lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
+        model.add_adapter(lora_config)
+
     elif args.low_rank_type == "pissa":
         """
         PiSSA initializes the LoRA adapter using the principal singular values and singular vectors
@@ -361,6 +370,7 @@ if len(args.low_rank_type) > 0:
                                  init_lora_weights="pissa",
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
+        model.add_adapter(lora_config)
 
     elif args.low_rank_type == "olora":
         """
@@ -372,6 +382,7 @@ if len(args.low_rank_type) > 0:
                                  init_lora_weights="olora",
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
+        model.add_adapter(lora_config)
 
     elif args.low_rank_type == "eva":
 
@@ -385,6 +396,7 @@ if len(args.low_rank_type) > 0:
                                  eva_config=EvaConfig(rho=2.0),
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
+        model.add_adapter(lora_config)
 
     elif args.low_rank_type == "rslora":
 
@@ -392,6 +404,7 @@ if len(args.low_rank_type) > 0:
                                  use_rslora=True,
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
+        model.add_adapter(lora_config)
 
     elif args.low_rank_type == "dora":
         """
@@ -403,11 +416,12 @@ if len(args.low_rank_type) > 0:
                                  use_dora=True,
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
+        model.add_adapter(lora_config)
 
     else:
         raise NotImplementedError
 
-    model.add_adapter(lora_config)
+ 
 else:
     # nothing happens
     model.proj_out.weight = model.model.decoder.embed_tokens.weight
