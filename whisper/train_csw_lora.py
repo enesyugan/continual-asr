@@ -4,6 +4,7 @@ import re
 import warnings
 import argparse
 import math
+from collections import defaultdict
 
 from datasets import load_dataset, ClassLabel, Features, Value, Dataset, Audio, concatenate_datasets, \
     interleave_datasets
@@ -46,12 +47,10 @@ parser.add_argument('-low_rank_type', type=str, default="lora",
                     help='Whisper Model size: ["lora", "pissa", "olora", "eva", "rslora", "dora"')
 parser.add_argument('-low_rank_modules', type=str, default="qv",
                     help='Whisper Model size: ["qv", "all-linear"')
-parser.add_argument('-dataset', required=True,
-                    help="Path to the dataset in huggingface format")
-
+parser.add_argument('-datasets', required=True, default=[], type=str,
+                        nargs="+", help="Paths to the model checkpoints")
 parser.add_argument('-output_dir', default="outputs",
                     help="Path to model checkpoint to be loaded")
-
 parser.add_argument('-checkpoint_path', default="",
                     help="Path to model checkpoint to be loaded")
 parser.add_argument('-learning_rate', type=float, default=0.001,
@@ -98,57 +97,189 @@ parser.add_argument('-disable_safetensors', action='store_true',
 
 args = parser.parse_args()
 
-# TODO: add option to
-if args.dataset.lower() == 'seame':
-    from prepare_data import get_data_seame
 
-    all_tr_dataset, all_dev_dataset = get_data_seame(debug=False)
-    print("Training data: {}".format(all_tr_dataset))
-    print("DEV data: {}".format(all_dev_dataset))
-    training_uid_mapper = None
-    dev_uid_mapper = None
-elif args.dataset.lower() == 'fisher':
-    from prepare_data import get_data_fisher
+def get_train_dev(dataset):
+    # TODO: add option to
+    if dataset.lower() == 'seame':
+        from prepare_data import get_data_seame
+    
+        all_tr_dataset, all_dev_dataset = get_data_seame(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'fisher':
+        from prepare_data import get_data_fisher
+    
+        all_tr_dataset, all_dev_dataset = get_data_fisher(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'arzen':
+        from prepare_data import get_data_arzen
+    
+        all_tr_dataset, all_dev_dataset = get_data_arzen(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'ascend':
+        from prepare_data import get_data_ascend
+    
+        all_tr_dataset, all_dev_dataset = get_data_ascend(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'talcs':
+        from prepare_data import get_data_talcs
+    
+        all_tr_dataset, all_dev_dataset = get_data_talcs(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'tunswitch':
+        from prepare_data import get_data_tunswitch
+    
+        all_tr_dataset, all_dev_dataset = get_data_tunswitch(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'pa':
+        from prepare_data import get_data_pa
+    
+        all_tr_dataset, all_dev_dataset = get_data_pa(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'sq':
+        from prepare_data import get_data_sq
+    
+        all_tr_dataset, all_dev_dataset = get_data_sq(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'vi':
+        from prepare_data import get_data_vi
+    
+        all_tr_dataset, all_dev_dataset = get_data_vi(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'tr':
+        from prepare_data import get_data_tr
+    
+        all_tr_dataset, all_dev_dataset = get_data_tr(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'ar':
+        from prepare_data import get_data_ar
+    
+        all_tr_dataset, all_dev_dataset = get_data_ar(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'uz':
+        from prepare_data import get_data_uz
+    
+        all_tr_dataset, all_dev_dataset = get_data_uz(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'fa':
+        from prepare_data import get_data_fa
+    
+        all_tr_dataset, all_dev_dataset = get_data_fa(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    
+    elif dataset.lower() == 'lv':
+        from prepare_data import get_data_lv
+    
+        all_tr_dataset, all_dev_dataset = get_data_lv(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'fi':
+        from prepare_data import get_data_fi
+    
+        all_tr_dataset, all_dev_dataset = get_data_fi(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'be':
+        from prepare_data import get_data_be
+    
+        all_tr_dataset, all_dev_dataset = get_data_be(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    elif dataset.lower() == 'et':
+        from prepare_data import get_data_et
+    
+        all_tr_dataset, all_dev_dataset = get_data_et(debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+    
+    else:
+        from prepare_data import get_data_flex
+        all_tr_dataset, all_dev_dataset = get_data_flex(dataset.lower(), debug=False)
+        print("Training data: {}".format(all_tr_dataset))
+        print("DEV data: {}".format(all_dev_dataset))
+        training_uid_mapper = None
+        dev_uid_mapper = None
+        if len(all_tr_dataset) ==0:
+            raise NotImplementedError("Unknown dataset: {}".format(args.dataset))
 
-    all_tr_dataset, all_dev_dataset = get_data_fisher(debug=False)
-    print("Training data: {}".format(all_tr_dataset))
-    print("DEV data: {}".format(all_dev_dataset))
-    training_uid_mapper = None
-    dev_uid_mapper = None
-elif args.dataset.lower() == 'arzen':
-    from prepare_data import get_data_arzen
+    return all_tr_dataset, all_dev_dataset
 
-    all_tr_dataset, all_dev_dataset = get_data_arzen(debug=False)
-    print("Training data: {}".format(all_tr_dataset))
-    print("DEV data: {}".format(all_dev_dataset))
-    training_uid_mapper = None
-    dev_uid_mapper = None
-elif args.dataset.lower() == 'ascend':
-    from prepare_data import get_data_ascend
 
-    all_tr_dataset, all_dev_dataset = get_data_ascend(debug=False)
-    print("Training data: {}".format(all_tr_dataset))
-    print("DEV data: {}".format(all_dev_dataset))
-    training_uid_mapper = None
-    dev_uid_mapper = None
-elif args.dataset.lower() == 'talcs':
-    from prepare_data import get_data_talcs
+def merge_dicts(dict_list):
+    new_dict = {}
+    key_counts = defaultdict(int)
 
-    all_tr_dataset, all_dev_dataset = get_data_talcs(debug=False)
-    print("Training data: {}".format(all_tr_dataset))
-    print("DEV data: {}".format(all_dev_dataset))
-    training_uid_mapper = None
-    dev_uid_mapper = None
-elif args.dataset.lower() == 'tunswitch':
-    from prepare_data import get_data_tunswitch
+    for d in dict_list:
+        for key, value in d.items():
+            if key in new_dict:
+                key_counts[key] += 1
+                new_dict[f"{key_counts[key]}_{key}"] = value
+            else:
+                new_dict[key] = value
+                key_counts[key] = 0  # Initialize counter
 
-    all_tr_dataset, all_dev_dataset = get_data_tunswitch(debug=False)
-    print("Training data: {}".format(all_tr_dataset))
-    print("DEV data: {}".format(all_dev_dataset))
-    training_uid_mapper = None
-    dev_uid_mapper = None
-else:
-    raise NotImplementedError("Unknown dataset: {}".format(args.dataset))
+    return new_dict
+
+training_uid_mapper = None
+dev_uid_mapper = None
+
+train_dicts_list = list()
+dev_datasets_list = list()
+for dataset in args.datasets:
+    print(f"[INFO] Loading {dataset}...")
+    train_dict, dev_dataset = get_train_dev(dataset)
+    train_dicts_list.append(train_dict)
+    dev_datasets_list.append(dev_dataset)
+
+all_tr_dataset = merge_dicts(train_dicts_list)
+all_dev_dataset = concatenate_datasets(dev_datasets_list)
+print(f"[INFO] combined training datasets: {all_tr_dataset}")
 
 
 # training_uid_mapper = {key: idx for idx, key in enumerate(concat_tr_dataset["uid"])}
@@ -431,8 +562,10 @@ elif args.lr_scheduler == 'cosine':
 else:
     raise NotImplementedError
 
+
 output_dir = args.output_dir + "/model_%s_%s_%s_%s" % (
-    args.model_size, args.dataset, args.low_rank_type, args.low_rank_modules)
+    args.model_size, "-".join(args.datasets), args.low_rank_type, args.low_rank_modules)
+
 
 
 # TODO: logging_dir

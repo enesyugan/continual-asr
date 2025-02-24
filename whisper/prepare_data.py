@@ -84,6 +84,15 @@ mapper_orig = {
     "ja": "<|ja|>",
     "zh": "<|zh|>",
     "tr": "<|tr|>",
+    "pa": "<|pa|>",
+    "sq": "<|sq|>",
+    "vi": "<|vi|>",
+    "fa": "<|fa|>",
+    "uz": "<|uz|>",
+    "lv": "<|lv|>",
+    "fi": "<|fi|>",
+    "be": "<|be|>",
+    "et": "<|et|>",
     "mix": "mix",
     "<unk>": "<unk>",
     "<eos>": "<eos>",
@@ -622,3 +631,453 @@ def get_data_tunswitch(debug=False):
 
     return datasets, all_dev_dataset
 
+
+def get_data_pa(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading PA (Punjabi) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    pa_train = "pa_train.mp3.stm"
+    pa_dev = "pa_dev.mp3.stm"
+
+    
+    shuffle_pa_train_dataset = load_asr_dataset(pa_train, "pa").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    pa_dev_dataset = load_asr_dataset(pa_dev, "pa")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_pa_train_dataset  #csw_train_dataset
+
+    dev_list.append(pa_dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+    
+def get_data_sq(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading SQ (Albanian) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    sq_train = "sq_train.mp3.stm"
+    sq_dev = "sq_dev.mp3.stm"
+
+    
+    shuffle_sq_train_dataset = load_asr_dataset(sq_train, "sq").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    sq_dev_dataset = load_asr_dataset(sq_dev, "sq")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_sq_train_dataset  #csw_train_dataset
+
+    dev_list.append(sq_dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+def get_data_vi(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading VI (Vietnamese) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    vi_train = "vi_train.mp3.stm"
+    vi_dev = "vi_dev.mp3.stm"
+
+    
+    shuffle_vi_train_dataset = load_asr_dataset(vi_train, "vi").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    vi_dev_dataset = load_asr_dataset(vi_dev, "vi")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_vi_train_dataset  #csw_train_dataset
+
+    dev_list.append(vi_dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+def get_data_tr(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading TR (Turkish) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    train = "tr_train.mp3.stm"
+    dev = "tr_dev.mp3.stm"
+
+    
+    shuffle_train_dataset = load_asr_dataset(train, "tr").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    dev_dataset = load_asr_dataset(dev, "tr")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
+
+    dev_list.append(dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+def get_data_ar(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading AR (Arabic) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    train = "ar_train.mp3.stm"
+    dev = "ar_dev.mp3.stm"
+
+    
+    shuffle_train_dataset = load_asr_dataset(train, "ar").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    dev_dataset = load_asr_dataset(dev, "ar")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
+
+    dev_list.append(dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+
+def get_data_fa(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading FA (Farsi/Persian) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    train = "fa_train.mp3.stm"
+    dev = "fa_dev.mp3.stm"
+
+    
+    shuffle_train_dataset = load_asr_dataset(train, "fa").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    dev_dataset = load_asr_dataset(dev, "fa")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
+
+    dev_list.append(dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+def get_data_uz(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading UZ (Uzbek) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    train = "uz_train.mp3.stm"
+    dev = "uz_dev.mp3.stm"
+
+    
+    shuffle_train_dataset = load_asr_dataset(train, "uz").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    dev_dataset = load_asr_dataset(dev, "uz")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
+
+    dev_list.append(dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+def get_data_lv(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading LV (Latvian) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    train = "lv_train.mp3.stm"
+    dev = "lv_dev.mp3.stm"
+
+    
+    shuffle_train_dataset = load_asr_dataset(train, "lv").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    dev_dataset = load_asr_dataset(dev, "lv")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
+
+    dev_list.append(dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+def get_data_fi(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading FI (Finish) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    train = "fi_train.mp3.stm"
+    dev = "fi_dev.mp3.stm"
+
+    
+    shuffle_train_dataset = load_asr_dataset(train, "fi").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    dev_dataset = load_asr_dataset(dev, "fi")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
+
+    dev_list.append(dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+def get_data_be(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading BE (Belarusian) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    train = "be_train.mp3.stm"
+    dev = "be_dev.mp3.stm"
+
+    
+    shuffle_train_dataset = load_asr_dataset(train, "be").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    dev_dataset = load_asr_dataset(dev, "be")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
+
+    dev_list.append(dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+def get_data_et(debug=False):
+    datasets = {}
+
+    dev_list = []
+
+    print("Loading ET (Estonian) ...")
+   # tunswitch_mono_train = "tunswitch_mono_train.stm"
+   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
+    train = "et_train.mp3.stm"
+    dev = "et_dev.mp3.stm"
+
+    
+    shuffle_train_dataset = load_asr_dataset(train, "et").shuffle(seed=42)
+    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
+    dev_dataset = load_asr_dataset(dev, "et")
+  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
+  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
+
+
+    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
+
+    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
+
+    dev_list.append(dev_dataset)
+   # dev_list.append(tunswitch_mono_dev_dataset)
+    all_dev_dataset = concatenate_datasets(dev_list)
+
+    print(datasets)
+    print("===" * 20)
+    print(dev_list)
+
+    print("=====")
+    print(f"Dev data: {all_dev_dataset}")
+
+    return datasets, all_dev_dataset
+
+
+flex_datasets = {
+    "ar_cv": {"train": ["ar_cv_train_lenght.stm"], "dev": ["ar_cv_dev_length.stm"]}, #common voice
+    "ar_mgb": {"train": ["ar_mgb_mgb-clip.stm"], "dev": None}, #mgb aljazeera
+    "ar_ldclv": {"train": ["ar_ldclv_train_split_clip.stm"], "dev": None}, #ldc2006S29 Levantine arabic
+    "ar_mediaspeech": {"train":  ["ar_mediaspeech_tr.mediaspeech.stm"], "dev": None}, # mediaspeech
+    "ar_juansy": {"train": ["ar_juansy_juan-syrian-clip.stm"], "dev": None}, #levantine by juan
+    "ar_mini": {"train": ["ar_mini_mini-clip.stm"], "dev": None}, #mini questionaire
+    "ar_quran": {"train": ["ar_quran_train.not.stm"], "dev": None}, #Quran arabic
+    "ar_tunmmsa": {"train": ["ar_tunmmsa_train.stm"], "dev": ["ar_tunmmsa_dev.stm"]}, #tunisian msa
+    "ar_tunmsaslt": {"train": ["ar_tunmsaslt_train.asr.stm"], "dev": ["ar_tunmsaslt_dev.asr.stm"]}, # tunisian msa slt ldc2022e01
+    }
+
+
+def get_data_flex(dataset, debug=False):    
+    datasets = {}
+
+    dev_list = []
+    
+    lang = dataset.split("_")[0]
+    # Get dataset paths from the dictionary
+    dataset_info = flex_datasets.get(dataset, {})
+    
+    # Process train datasets
+    train_datasets = []
+    if "train" in dataset_info and dataset_info["train"]:
+    train_files = dataset_info["train"]
+    for train_file in train_files:
+        train_datasets.append(load_asr_dataset(train_file, lang))
+    
+    # Concatenate multiple train datasets if needed
+    train_data = None
+    if train_datasets:
+        train_data = train_datasets[0] if len(train_datasets) == 1 else concatenate_datasets(train_datasets)
+        train_data = train_data.shuffle(seed=42)  # Shuffle train dataset
+
+    # Process dev datasets
+    dev_datasets = []
+    if "dev" in dataset_info and dataset_info["dev"]:
+    dev_files = dataset_info["dev"]
+    for dev_file in dev_files:
+        dev_datasets.append(load_asr_dataset(dev_file, lang))
+
+        
+    dev_data = None
+    if dev_datasets:
+        dev_data = dev_datasets[0] if len(dev_datasets) == 1 else concatenate_datasets(dev_datasets)
+
+    return train_data, dev_data
+
+    
+    
