@@ -56,7 +56,7 @@ def split_dataset(dataset, num_chunks):
 
 
 def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_path,
-                          device_id, batch_size, beam_size, total_samples,
+                          tgt_lang, device_id, batch_size, beam_size, total_samples,
                           no_progress_bar, lora_weights, result_queue):
     """Loads model on specific GPU and decodes its chunk."""
     torch.cuda.set_device(device_id)
@@ -136,6 +136,13 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
     forced_decoder_ids = list()
     # print(model.generation_config.forced_decoder_ids[0], flush=True)
     # print(ASD)
+    if tgt_lang == "":
+        forced_decoder_ids.append(model.generation_config.forced_decoder_ids[0])
+    else:
+        tgt_lang_id = processor.tokenizer.convert_tokens_to_ids(tgt_lang)
+        print(f"Set target lang:{tgt_lang} id: {tgt_lang_id}")
+        forced_decoder_ids.append([1, tgt_lang_id])
+
     forced_decoder_ids.append(model.generation_config.forced_decoder_ids[0])
     forced_decoder_ids.append([2, transcribe_id])
     forced_decoder_ids.append([3, notimestamps_id])
@@ -246,6 +253,8 @@ if __name__ == "__main__":
                         help="Path to the model checkpoint")
     parser.add_argument('-test_stm', required=True, default="test_length.cl_lc.stm",
                         help='Source file to decode (one line per sequence)')
+    parser.add_argument('-tgt_lang', required=False, default="", type=str,
+                        help="set language token to decode into,i.e. <|en|>, <|de|>, ...")
     # parser.add_argument('-huggingface_dataset', required=False, default="",
     #                     help="If src is none, using huggingface dataset")
     parser.add_argument('-batch_size', type=int, default=8,
@@ -287,15 +296,15 @@ if __name__ == "__main__":
             process = mp.Process(target=load_model_and_decode,
                                  args=(gpu_id, dataset_chunks[gpu_id],
                                        args.model_path, args.lora_path, args.tokenizer_path,
-                                       gpu_id, args.batch_size, args.beam_size, total_size,
-                                       args.no_progress_bar, args.lora_weights,
+                                       args.tgt_lang, gpu_id, args.batch_size, args.beam_size,
+                                       total_size, args.no_progress_bar, args.lora_weights,
                                        result_queue))
             process.start()
             processes.append(process)
 
     else:
         load_model_and_decode(0, test_dataset, args.model_path, args.lora_path, args.tokenizer_path,
-                              0, args.batch_size, args.beam_size, total_size,
+                              args.tgt_lang,  0, args.batch_size, args.beam_size, total_size,
                               args.no_progress_bar, args.lora_weights, result_queue)
 
     # Collect results

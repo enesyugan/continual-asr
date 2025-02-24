@@ -171,7 +171,8 @@ def load_asr_dataset(file_path, language):
 
         transcript = "<|startoftranscript|><|transcribe|><|notimestamps|> {}<|endoftext|>".format(transcript)
 
-        if not wav_path.lower().endswith(".wav"): wav_path = wav_path + ".wav"
+        if not wav_path.lower().endswith(".wav") and not wav_path.lower().endswith(".mp3"):
+            wav_path = wav_path + ".wav"
 
         # if len(parts) >= 3:  # Assuming at least 5 columns in STM file
         data.append({
