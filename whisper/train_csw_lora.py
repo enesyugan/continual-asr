@@ -49,6 +49,8 @@ parser.add_argument('-low_rank_modules', type=str, default="qv",
                     help='Whisper Model size: ["qv", "all-linear"')
 parser.add_argument('-datasets', required=True, default=[], type=str,
                         nargs="+", help="Paths to the model checkpoints")
+parser.add_argument('-lower_case', action='store_true',
+                    help="set if you want to lower case transcripts")
 parser.add_argument('-output_dir', default="outputs",
                     help="Path to model checkpoint to be loaded")
 parser.add_argument('-checkpoint_path', default="",
@@ -98,12 +100,13 @@ parser.add_argument('-disable_safetensors', action='store_true',
 args = parser.parse_args()
 
 
-def get_train_dev(dataset):
+def get_train_dev(dataset, lower_case):
+    print(f"LOWER: {lower_case}")
     # TODO: add option to
     if dataset.lower() == 'seame':
         from prepare_data import get_data_seame
     
-        all_tr_dataset, all_dev_dataset = get_data_seame(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_seame(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -111,7 +114,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'fisher':
         from prepare_data import get_data_fisher
     
-        all_tr_dataset, all_dev_dataset = get_data_fisher(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_fisher(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -119,7 +122,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'arzen':
         from prepare_data import get_data_arzen
     
-        all_tr_dataset, all_dev_dataset = get_data_arzen(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_arzen(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -127,7 +130,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'ascend':
         from prepare_data import get_data_ascend
     
-        all_tr_dataset, all_dev_dataset = get_data_ascend(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_ascend(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -135,7 +138,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'talcs':
         from prepare_data import get_data_talcs
     
-        all_tr_dataset, all_dev_dataset = get_data_talcs(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_talcs(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -143,7 +146,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'tunswitch':
         from prepare_data import get_data_tunswitch
     
-        all_tr_dataset, all_dev_dataset = get_data_tunswitch(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_tunswitch(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -151,7 +154,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'pa':
         from prepare_data import get_data_pa
     
-        all_tr_dataset, all_dev_dataset = get_data_pa(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_pa(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -159,7 +162,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'sq':
         from prepare_data import get_data_sq
     
-        all_tr_dataset, all_dev_dataset = get_data_sq(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_sq(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -167,7 +170,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'vi':
         from prepare_data import get_data_vi
     
-        all_tr_dataset, all_dev_dataset = get_data_vi(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_vi(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -175,7 +178,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'tr':
         from prepare_data import get_data_tr
     
-        all_tr_dataset, all_dev_dataset = get_data_tr(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_tr(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -183,7 +186,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'ar':
         from prepare_data import get_data_ar
     
-        all_tr_dataset, all_dev_dataset = get_data_ar(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_ar(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -191,7 +194,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'uz':
         from prepare_data import get_data_uz
     
-        all_tr_dataset, all_dev_dataset = get_data_uz(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_uz(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -199,7 +202,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'fa':
         from prepare_data import get_data_fa
     
-        all_tr_dataset, all_dev_dataset = get_data_fa(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_fa(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -208,7 +211,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'lv':
         from prepare_data import get_data_lv
     
-        all_tr_dataset, all_dev_dataset = get_data_lv(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_lv(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -216,7 +219,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'fi':
         from prepare_data import get_data_fi
     
-        all_tr_dataset, all_dev_dataset = get_data_fi(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_fi(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -224,7 +227,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'be':
         from prepare_data import get_data_be
     
-        all_tr_dataset, all_dev_dataset = get_data_be(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_be(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -232,7 +235,7 @@ def get_train_dev(dataset):
     elif dataset.lower() == 'et':
         from prepare_data import get_data_et
     
-        all_tr_dataset, all_dev_dataset = get_data_et(debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_et(lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -240,13 +243,13 @@ def get_train_dev(dataset):
     
     else:
         from prepare_data import get_data_flex
-        all_tr_dataset, all_dev_dataset = get_data_flex(dataset.lower(), debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_flex(dataset.lower(), lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
         dev_uid_mapper = None
         if len(all_tr_dataset) ==0:
-            raise NotImplementedError("Unknown dataset: {}".format(args.dataset))
+            raise NotImplementedError("Unknown dataset: {}".format(dataset))
 
     return all_tr_dataset, all_dev_dataset
 
@@ -273,7 +276,7 @@ train_dicts_list = list()
 dev_datasets_list = list()
 for dataset in args.datasets:
     print(f"[INFO] Loading {dataset}...")
-    train_dict, dev_dataset = get_train_dev(dataset)
+    train_dict, dev_dataset = get_train_dev(dataset, args.lower_case)
     train_dicts_list.append(train_dict)
     dev_datasets_list.append(dev_dataset)
 
@@ -344,6 +347,8 @@ elif args.low_rank_modules == "all-linear":
 else:
     raise NotImplementedError
 
+print(f"EEEEE: {len(args.low_rank_type)}")
+print(ASD)
 if len(args.low_rank_type) > 0:
     if args.low_rank_type == "lora":
         lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
