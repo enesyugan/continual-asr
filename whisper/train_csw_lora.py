@@ -98,10 +98,9 @@ parser.add_argument('-disable_safetensors', action='store_true',
                     help="Use exponential moving average during training")
 
 args = parser.parse_args()
-
+print(args)
 
 def get_train_dev(dataset, lower_case):
-    print(f"LOWER: {lower_case}")
     # TODO: add option to
     if dataset.lower() == 'seame':
         from prepare_data import get_data_seame

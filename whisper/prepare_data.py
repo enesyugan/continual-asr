@@ -15,7 +15,7 @@ import numpy as np
 from random import shuffle
 from concurrent.futures import ThreadPoolExecutor
 import torch
-
+from normalizers import ArNormalizer
 # from trainer_mem import MemSeq2SeqTrainer
 from trainers.trainer_mem import MemSeq2SeqTrainer
 
@@ -155,6 +155,10 @@ def detect_language(text, mapper):
 
 def load_asr_dataset(file_path, language, lower):
     csw = True
+    normalizers = []
+    if language == "ar":
+        normalizers.append(ArNormalizer(norm_unicode=False, norm_orthographic=False, remove_diacrits=True))
+
     if type(language) is not list:
         language = [language]
         csw = False
@@ -190,6 +194,9 @@ def load_asr_dataset(file_path, language, lower):
         if transcript.strip() == "":
             skipped += 1
             continue
+        if normalizers:
+            for normalizer in normalizers:
+                transcript = normalizer(transcript)
 
         transcript = " ".join(transcript.split())
 
@@ -987,6 +994,7 @@ flex_datasets = {
     "ar_quran": {"train": ["ar_quran_train.not.stm"], "dev": None}, #Quran arabic
     "ar_tunmsa": {"train": ["ar_tunmsa_train.stm"], "dev": ["ar_tunmsa_dev.stm"]}, #tunisian msa
     "ar_tunmsaslt": {"train": ["ar_tunmsaslt_train.asr.stm"], "dev": ["ar_tunmsaslt_dev.asr.stm"]}, # tunisian msa slt ldc2022e01
+    "ar_clartts":  {"train": ["ar_clartts_train.stm"], "dev": None},
     }
 
 
