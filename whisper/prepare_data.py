@@ -995,6 +995,8 @@ flex_datasets = {
     "ar_tunmsa": {"train": ["ar_tunmsa_train.stm"], "dev": ["ar_tunmsa_dev.stm"]}, #tunisian msa
     "ar_tunmsaslt": {"train": ["ar_tunmsaslt_train.asr.stm"], "dev": ["ar_tunmsaslt_dev.asr.stm"]}, # tunisian msa slt ldc2022e01
     "ar_clartts":  {"train": ["ar_clartts_train.stm"], "dev": None},
+    "ar_linto": {"train": ["ar_linto_train.stm"], "dev": None},
+    "ar_masc": {"train": ["ar_masc_train.stm"], "dev": ["ar_masc_validation.stm"]},
     }
 
 
