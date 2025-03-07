@@ -999,12 +999,31 @@ flex_datasets = {
     "ar_masc": {"train": ["ar_masc_train.stm"], "dev": ["ar_masc_validation.stm"]},
     }
 
+def full_path_dataset(dataset, lower):
+    datasets = {}
+    train_dataset = load_asr_dataset(dataset, "ar", lower).shuffle(seed=42)
+    total_samples = len(train_dataset)
+    split_size = min(3000, int(0.1 * total_samples))  # Use 10% of the data or 3000 samples max
+    if split_size > 0:
+        tmp = train_dataset.train_test_split(test_size=split_size)
+        train_data = tmp["train"]
+        dev_data = tmp["test"]
+    else:
+        print(f"Warning: Not enough data to create a dev split for {dataset}. Using all data for training.")
+    datset_name = dataset.rsplit("/",1)[-1].rsplit(".", 1)[0]
+    datasets[f"train_{datset_name}"] = train_dataset
+    return datasets, dev_data
+
 
 def get_data_flex(dataset, lower, debug=False):    
     datasets = {}
 
     dev_list = []
     
+    if "/" in dataset:
+        return full_path_dataset(dataset, lower)
+
+    dataset = dataset.lower()
     lang = dataset.split("_")[0]
     # Get dataset paths from the dictionary
     dataset_info = flex_datasets.get(dataset, {})

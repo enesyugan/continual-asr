@@ -48,7 +48,7 @@ parser.add_argument('-low_rank_type', type=str, default="lora",
 parser.add_argument('-low_rank_modules', type=str, default="qv",
                     help='Whisper Model size: ["qv", "all-linear"')
 parser.add_argument('-datasets', required=True, default=[], type=str,
-                        nargs="+", help="Paths to the model checkpoints")
+                        nargs="+", help="Paths to datasets")
 parser.add_argument('-lower_case', action='store_true',
                     help="set if you want to lower case transcripts")
 parser.add_argument('-output_dir', default="outputs",
@@ -242,7 +242,7 @@ def get_train_dev(dataset, lower_case):
     
     else:
         from prepare_data import get_data_flex
-        all_tr_dataset, all_dev_dataset = get_data_flex(dataset.lower(), lower_case, debug=False)
+        all_tr_dataset, all_dev_dataset = get_data_flex(dataset, lower_case, debug=False)
         print("Training data: {}".format(all_tr_dataset))
         print("DEV data: {}".format(all_dev_dataset))
         training_uid_mapper = None
@@ -273,11 +273,16 @@ dev_uid_mapper = None
 
 train_dicts_list = list()
 dev_datasets_list = list()
+dataset_names = list()
 for dataset in args.datasets:
     print(f"[INFO] Loading {dataset}...")
     train_dict, dev_dataset = get_train_dev(dataset, args.lower_case)
     train_dicts_list.append(train_dict)
     dev_datasets_list.append(dev_dataset)
+    if "/" in dataset:
+        dataset_names.append(dataset.rsplit("/", 1)[-1].rsplit(".", 1)[0])
+    else:
+        dataset_names.append(dataset)
 
 all_tr_dataset = merge_dicts(train_dicts_list)
 all_dev_dataset = concatenate_datasets(dev_datasets_list)
@@ -582,7 +587,7 @@ else:
 
 
 output_dir = args.output_dir + "/model_%s_%s_%s_%s" % (
-    args.model_size, "-".join(args.datasets), args.low_rank_type, args.low_rank_modules)
+    args.model_size, "-".join(dataset_names), args.low_rank_type, args.low_rank_modules)
 
 
 
