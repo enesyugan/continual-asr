@@ -247,6 +247,26 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         self.teacher_distillation = 0
         self.label_smoothing = 0
 
+    def _compute_kl(self) -> torch.Tensor:
+        """
+        Computes the total KL divergence from all Bayesian modules in self.model.
+        Assumes each Bayesian module implements a .kl_loss() method returning a scalar.
+        Returns:
+            total_kl (torch.Tensor): The summed KL loss.
+        """
+        # If you need it on the same device as the model, 
+        # we can create a 0.0 tensor on the correct device:
+        device = next(self.model.parameters()).device
+        total_kl = torch.tensor(0.0, device=device)
+    
+        # Traverse all submodules in self.model
+        for name, module in self.model.named_modules():
+            # Check if the module has a .kl_loss() method
+            if hasattr(module, "kl_loss") and callable(module.kl_loss):
+                # Accumulate
+                total_kl += module.kl_loss()
+        #print(f"{total_kl.shape}, {total_kl}"+"=="*30)
+        return total_kl
 
 
     def forward(
@@ -390,7 +410,8 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
                 # move labels to correct device to enable PP
                 loss = loss_fct(logits, labels)
                 ce_loss = loss
-
+            kl_scale = 1e-3
+            ce_loss = ce_loss + self._compute_kl() * kl_scale
             if teacher_lm_logits is not None:
 
                 # kl divergence loss
