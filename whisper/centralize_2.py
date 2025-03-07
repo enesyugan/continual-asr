@@ -1,5 +1,7 @@
 from memory_efficient_whisper import create_whisper_model
+from bnn_lora import BayesianLinear, BayesianLoraConfig
 import torch
+from torch import nn
 import os
 import signal
 import argparse
@@ -7,7 +9,8 @@ import copy
 from peft import PeftModel
 
 
-def centralize_and_save(model_path, lora_paths, save_path, save_as_lora=False):
+
+def centralize_and_save(model_path, lora_paths, save_path, custom_lora, save_as_lora=False):
     """
     Averages the weights of a list of PyTorch models and returns a new model with the centralized weights.
 
@@ -39,7 +42,12 @@ def centralize_and_save(model_path, lora_paths, save_path, save_as_lora=False):
     main_model = base_model
 
     lora_path = lora_paths[0]
-    main_model = PeftModel.from_pretrained(main_model, lora_path)
+    if custom_lora:
+        lora_config = BayesianLoraConfig.from_pretrained(lora_path)
+        lora_config._register_custom_module({nn.Linear: BayesianLinear})
+        main_model = PeftModel.from_pretrained(main_model, model_id=lora_path, config=lora_config)
+    else:
+        main_model = PeftModel.from_pretrained(main_model, lora_path)
     main_model.merge_and_unload()
 
     for idx, _lora_path in enumerate(lora_paths[1:]):
@@ -53,7 +61,12 @@ def centralize_and_save(model_path, lora_paths, save_path, save_as_lora=False):
         lora_weights_path = _lora_path
 
         # 2. Load the LoRA adapter weights onto the base model
-        sub_model = PeftModel.from_pretrained(sub_model, lora_weights_path)
+        if custom_lora:
+            lora_config = BayesianLoraConfig.from_pretrained(lora_weights_path)
+            lora_config._register_custom_module({nn.Linear: BayesianLinear})
+            sub_model = PeftModel.from_pretrained(main_model, model_id=lora_weights_path, config=lora_config)
+        else:
+            sub_model = PeftModel.from_pretrained(sub_model, lora_weights_path)
         sub_model.merge_and_unload()
 
         # 3. Merge the LoRA weights into the base model's weights and unload the adapter
@@ -109,12 +122,14 @@ if __name__ == "__main__":
                         nargs="+", help="Paths to the model checkpoints")
     parser.add_argument('-save_path', required=True, default="", type=str,
                         help="Path where the new model will be saved")
+    parser.add_argument('-custom_lora', action='store_true', 
+                        help="Use spec augmentation")
     parser.add_argument('-save_as_lora', action='store_true', 
                         help="Use spec augmentation")
 
     args = parser.parse_args()
 
-    centralize_and_save(args.model_path, args.lora_paths, args.save_path, args.save_as_lora)
+    centralize_and_save(args.model_path, args.lora_paths, args.save_path, args.custom_lora, args.save_as_lora)
 
 
 	

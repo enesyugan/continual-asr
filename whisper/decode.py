@@ -29,6 +29,7 @@ from jiwer import wer, cer
 import jiwer
 
 import torch
+from torch import nn
 
 import sys
 import argparse
@@ -39,6 +40,7 @@ from decode_utils import (DataCollatorSpeechSeq2SeqWithPadding,
                           remove_special_characters)
 
 from memory_efficient_whisper import create_whisper_model
+from bnn_lora import BayesianLinear, BayesianLoraConfig
 
 
 def split_dataset(dataset, num_chunks):
@@ -56,7 +58,7 @@ def split_dataset(dataset, num_chunks):
 
 
 def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_path,
-                          tgt_lang, device_id, batch_size, beam_size, total_samples,
+                          tgt_lang, custom_lora, device_id, batch_size, beam_size, total_samples,
                           no_progress_bar, lora_weights, result_queue):
     """Loads model on specific GPU and decodes its chunk."""
     torch.cuda.set_device(device_id)
@@ -75,7 +77,12 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
         main_model = model
 
         print("[INFO] Loading LORA weights from {}".format(lora_paths[0]))
-        main_model = PeftModel.from_pretrained(main_model, lora_paths[0])
+        if custom_lora:
+            lora_config = BayesianLoraConfig.from_pretrained(lora_paths[0])
+            lora_config._register_custom_module({nn.Linear: BayesianLinear})
+            main_model = PeftModel.from_pretrained(main_model, model_id=lora_paths[0], config=lora_config)
+        else:
+            main_model = PeftModel.from_pretrained(main_model, lora_paths[0])
         main_model.merge_and_unload()
         # checkpoint = main_model.state_dict()
 
@@ -220,11 +227,9 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
             # print(uid)
             predictions_lst.extend(pred_transcript)
 
-            # if idx < 3:
-            #     print(output_tokens)
-            #     print(f"target: {target_lst}")
-            #     # print(f"target_language_lst: {target_language_lst}")
-            #     print(f"pred_language: {predictions_lst}")
+            if idx == 3:
+                print(f"target: {target_lst}")
+                print(f"pred_language: {predictions_lst}")
             # else:
             #     continue
 
@@ -267,6 +272,8 @@ if __name__ == "__main__":
 
     parser.add_argument('-no_progress_bar', action='store_true',
                         help="Use spec augmentation")
+    parser.add_argument('-custom_lora', action='store_true',
+                        help="Use spec augmentation")
 
     parser.add_argument('-lora_weights', required=False, default="", type=str,
                         help="Efficients for each lora set")
@@ -295,7 +302,7 @@ if __name__ == "__main__":
             process = mp.Process(target=load_model_and_decode,
                                  args=(gpu_id, dataset_chunks[gpu_id],
                                        args.model_path, args.lora_path, args.tokenizer_path,
-                                       args.tgt_lang, gpu_id, args.batch_size, args.beam_size,
+                                       args.tgt_lang, args.custom_lora, gpu_id, args.batch_size, args.beam_size,
                                        total_size, args.no_progress_bar, args.lora_weights,
                                        result_queue))
             process.start()
@@ -303,7 +310,7 @@ if __name__ == "__main__":
 
     else:
         load_model_and_decode(0, test_dataset, args.model_path, args.lora_path, args.tokenizer_path,
-                              args.tgt_lang,  0, args.batch_size, args.beam_size, total_size,
+                              args.tgt_lang, args.custom_lora, 0, args.batch_size, args.beam_size, total_size,
                               args.no_progress_bar, args.lora_weights, result_queue)
 
     # Collect results
