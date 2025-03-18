@@ -62,6 +62,8 @@ parser.add_argument('-learning_rate', type=float, default=0.001,
                     used, then this is the global learning rate. Recommended
                     settings: sgd = 1, adagrad = 0.1,
                     adadelta = 1, adam = 0.001""")
+parser.add_argument('-kl_scale', type=float, default=1e-4,
+                    help="scaling factor of BNN KL loss")
 parser.add_argument('-warmup_steps', type=int, default=2000,
                     help='Number of warm up steps for learning rate')
 parser.add_argument('-lr_scheduler', type=str, default="inv_sqrt",
@@ -374,6 +376,7 @@ if args.low_rank_type == "diagonal_gaussian":
         }
     )
     model.add_adapter(lora_config)
+    model.kl_scale = args.kl_scale
 else:
     print("NOT BNN")
     lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
@@ -602,6 +605,38 @@ class LoadFullModelCallback(TrainerCallback):
             model.save_pretrained(state.best_model_checkpoint, save_adapter=False)
 
 
+class AggregatedAdditionalLossesCallback(TrainerCallback):
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        # Initialize accumulation dictionary and counter.
+        state.additional_losses_sum = {}
+        state.additional_losses_steps = 0
+        return control
+
+    def on_step_end(self, args, state, control, **kwargs):
+        # Get the additional losses from the current step (set by compute_loss).
+        current_losses = getattr(state, "additional_losses", None)
+        if current_losses is not None:
+            for key, value in current_losses.items():
+                state.additional_losses_sum[key] = state.additional_losses_sum.get(key, 0.0) + value
+            state.additional_losses_steps += 1
+        return control
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if state.additional_losses_steps > 0:
+            # Compute the average additional losses over the logging interval.
+            avg_additional_losses = {
+                key: state.additional_losses_sum[key] / state.additional_losses_steps
+                for key in state.additional_losses_sum
+            }
+            logs["additional_losses"] = avg_additional_losses
+            # Reset the accumulation.
+            trainer._additional_losses_sum = {}
+            trainer._additional_losses_steps = 0
+
+        return control
+
+
 # trainer = Seq2SeqTrainer(
 trainer = MemSeq2SeqTrainer(
     train_dataset_dict=all_tr_dataset,
@@ -614,7 +649,7 @@ trainer = MemSeq2SeqTrainer(
     optimizers=(optimizer, lr_scheduler),
     # compute_metrics=compute_metrics,
     tokenizer=processor.feature_extractor,
-    callbacks=[early_stopping, LoadFullModelCallback()]
+    callbacks=[early_stopping, LoadFullModelCallback(), AggregatedAdditionalLossesCallback()]
 )
 
 # trainer.state.stateful_callbacks['EarlyStoppingCallback'] = early_stopping

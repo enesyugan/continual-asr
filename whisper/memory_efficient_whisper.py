@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 import os
 
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, Dict
 from dataclasses import dataclass
 from collections import OrderedDict
 import numpy as np
@@ -246,6 +246,7 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         self.teacher = None
         self.teacher_distillation = 0
         self.label_smoothing = 0
+        self.kl_scale = 0.
 
     def _compute_kl(self) -> torch.Tensor:
         """
@@ -379,6 +380,7 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         loss = None
         ce_loss = None
         distilled_loss = None
+        additional_losses = {}
         if labels is not None:
 
             labels = labels.to(lm_logits.device).reshape(-1)
@@ -410,8 +412,13 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
                 # move labels to correct device to enable PP
                 loss = loss_fct(logits, labels)
                 ce_loss = loss
-            kl_scale = 1e-3
-            ce_loss = ce_loss + self._compute_kl() * kl_scale
+
+            kl_loss = self._compute_kl() * self.kl_scale
+            #print(f"ce: {ce_loss} kl: {kl_loss}", flush=True)
+            ce_loss = ce_loss + kl_loss
+
+            if kl_loss != 0.0: additional_losses["kl_loss"] = kl_loss
+
             if teacher_lm_logits is not None:
 
                 # kl divergence loss
@@ -457,6 +464,7 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
             encoder_attentions=outputs.encoder_attentions,
             ce_loss=ce_loss,
             distilled_loss=distilled_loss,
+            additional_losses=additional_losses if len(additional_losses) > 0 else None,
         )
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
@@ -473,6 +481,7 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
 class DistilledSeq2SeqLMOutput(Seq2SeqLMOutput):
     ce_loss: Optional[torch.FloatTensor] = None  # Add distillation_loss
     distilled_loss: Optional[torch.FloatTensor] = None  # Add distillation_loss
+    additional_losses: Optional[Dict[str, torch.FloatTensor]] = None 
 
 
 def create_whisper_model(model_name, torch_dtype,

@@ -6,6 +6,7 @@ from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft import LoraConfig
 from peft.utils.other import transpose
+import math
 
 class BayesianLoraConfig(LoraConfig):
     def __init__(
@@ -33,6 +34,7 @@ class BayesianRankParam(nn.Module):
 
         # The means and log-std
         self.mu = nn.Parameter(torch.zeros(self.rows, self.cols))
+        init_log_sigma = math.log(self.prior_std)
         self.log_sigma = nn.Parameter(torch.full((self.rows, self.cols), init_log_sigma))
 
         # You might add custom inits here if desired
@@ -93,9 +95,11 @@ class BayesianRankParam(nn.Module):
         kl = (
             (sigma**2 + self.mu**2) / (2.0 * prior_std_t**2)
             - 0.5
-            + self.log_sigma
-            - torch.log(prior_std_t)
+            + (torch.log(prior_std_t) - self.log_sigma)
+         #   + self.log_sigma
+         #   - torch.log(prior_std_t)
         )
+        #print(f"KL: {kl} kl.sum: {kl.sum()}", flush=True)
         return kl.sum()
 
 class BayesianLoRALayer(LoraLayer):
