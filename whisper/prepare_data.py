@@ -48,11 +48,11 @@ def normalize_text(utterance, language):
         raise ValueError(f'Text normalization for {language} is not supported')
 
 
-# CHARS_TO_IGNORE = [",", "?", "¿", ".", "!", "¡", ";", "；", ":", '""', "%", '"', "�", "ʿ", "·", "჻", "~", "՞", "؟",
-# "،", "।", "॥", "«", "»", "„", "“", "”", "「", "」", "‘", "’", "《", "》", "(", ")", "{", "}", "=", "`", "_", "+", "<",
-# ">", "…", "–", "°", "´", "ʾ", "‹", "›", "©", "®", "—", "→", "。", "、", "﹂", "﹁", "‧", "～", "﹏", "，", "｛", "｝", "（",
-# "）", "［", "］", "【", "】", "‥", "〽", "『", "』", "〝", "〟", "⟨", "⟩", "〜", "：", "！", "？", "♪", "؛", "/", "\\", "º", "−",
-# "^", "ʻ", "ˆ","]","[","-", "#"]
+CHARS_TO_IGNORE_PUNCT = [",", "?", "¿", ".", "!", "¡", ";", "；", ":", '""', "%", '"', "�", "ʿ", "·", "჻", "~", "՞", "؟",
+"،", "।", "॥", "«", "»", "„", "“", "”", "「", "」", "‘", "’", "《", "》", "(", ")", "{", "}", "=", "`", "_", "+", "<",
+">", "…", "–", "°", "´", "ʾ", "‹", "›", "©", "®", "—", "→", "。", "、", "﹂", "﹁", "‧", "～", "﹏", "，", "｛", "｝", "（",
+"）", "［", "］", "【", "】", "‥", "〽", "『", "』", "〝", "〟", "⟨", "⟩", "〜", "：", "！", "？", "♪", "؛", "/", "\\", "º", "−",
+"^", "ʻ", "ˆ","]","[","-", "#"]
 
 CHARS_TO_IGNORE = [
     "¿", "¡", ";", "；", ":", '"', "%", "�", "ʿ", "·", "჻", "~", "՞", "؟", "।", "॥", "«", "»", "„", "“", "”",
@@ -62,10 +62,13 @@ CHARS_TO_IGNORE = [
 ]
 
 chars_to_ignore_re = f"[{re.escape(''.join(CHARS_TO_IGNORE))}]"
+chars_to_ignore_punct_re = f"[{re.escape(''.join(CHARS_TO_IGNORE_PUNCT))}]"
 
 
-def remove_special_characters(text, lower):
-    if chars_to_ignore_re is not None:
+def remove_special_characters(text, lower, remove_punct):
+    if remove_punct:
+        text = re.sub(chars_to_ignore_punct_re, "", text)
+    else:
         text = re.sub(chars_to_ignore_re, "", text)
 
     return text.lower() if lower else text
@@ -93,6 +96,7 @@ mapper_orig = {
     "fi": "<|fi|>",
     "be": "<|be|>",
     "et": "<|et|>",
+	"bn": "<|bn|>",
     "mix": "mix",
     "<unk>": "<unk>",
     "<eos>": "<eos>",
@@ -153,7 +157,7 @@ def detect_language(text, mapper):
     return tmp
 
 
-def load_asr_dataset(file_path, language, lower):
+def load_asr_dataset(file_path, language, lower, remove_punct):
     csw = True
     normalizers = []
     if language == "ar":
@@ -190,7 +194,7 @@ def load_asr_dataset(file_path, language, lower):
         duration = float(duration)  # ms
         if duration < 500 or duration > 20000: skipped += 1; continue
 
-        transcript = remove_special_characters(transcript, lower)
+        transcript = remove_special_characters(transcript, lower, remove_punct)
         if transcript.strip() == "":
             skipped += 1
             continue
@@ -351,720 +355,108 @@ def do_csw_backup(train_list, pseudo_csw_amount, train=True):
     return csw_dataset
 
 
-#
-# def get_data(debug=False):
-#     datasets = {}
-#
-#     # Iterate over all directories in the current working directory
-#     for dir_name in os.listdir('../../../../repos/tmp'):
-#         print(f"Loading {dir_name} ...")
-#         # Check if it's a directory and ends with "..data"
-#         if os.path.isdir(dir_name) and dir_name.endswith(".data"):
-#             # Define the two files we need to load
-#             all_tr_file = os.path.join(dir_name, "all-tr.stm")
-#             small_dev_file = os.path.join(dir_name, "small-dev.stm")
-#
-#             # Check if the files exist in the directory
-#             if os.path.isfile(all_tr_file) and os.path.isfile(small_dev_file):
-#                 # Load the datasets using the hypothetical load_asr_dataset function
-#                 all_tr_dataset = load_asr_dataset(all_tr_file, "def").shuffle(seed=42)
-#                 small_dev_dataset = load_asr_dataset(small_dev_file, "def")
-#
-#                 # Use directory name and file name to create keys for the dictionary
-#                 datasets[f"{dir_name}_all-tr"] = all_tr_dataset
-#                 datasets[f"{dir_name}_small-dev"] = small_dev_dataset
-#
-#     dev_list = [v for k, v in datasets.items() if "_small-dev" in k]
-#     datasets = {k: v for k, v in datasets.items() if "_small-dev" not in k}
-#     #    dev_list = list()
-#     #    for k in datasets.keys():
-#     #        if "_small-dev" in k:
-#     #            dev_list.append(datasets[k])
-#     #            del datasets[k]
-#
-#     #  datasets = {}
-#
-#     #  print("Loading ARZEN...")
-#     #  arzen_train="/project/asr_systems/LT2022/codeswitching/data/ARX-ENG/arzen/ArzEn_SpeechCorpus_1.0/train-clip-ntags.stm"
-#     #  arzen_dev = "/project/asr_systems/LT2022/codeswitching/data/ARX-ENG/arzen/ArzEn_SpeechCorpus_1.0/dev-clip-ntags.stm"
-#     #  shuffle_arzen_train_dataset = load_asr_dataset(arzen_train, "ar").shuffle(seed=42)
-#     #  arzen_train_dataset = load_asr_dataset(arzen_train, "ar")
-#     #  arzen_dev_dataset = load_asr_dataset(arzen_dev, "ar")
-#
-#     print("Loading SEAME...")
-#     seame_train = "/project/asr_systems/LT2022/codeswitching/data/CMN-ENG/seame/train_clip.stm"
-#     seame_train_dataset = load_asr_dataset(seame_train, "def")
-#     tmp = seame_train_dataset.train_test_split(test_size=3000)
-#     seame_train_dataset = tmp["train"]
-#     seame_dev_dataset = tmp["test"]
-#     shuffle_seame_train_dataset = seame_train_dataset.shuffle(seed=42)
-#
-#     dev_list.append(seame_dev_dataset)
-#     #  print("Loadin ASCEND ...")
-#     #  ascend_train="/project/asr_systems/LT2022/codeswitching/data/CMN-ENG/ASCEND/train_notags.stm"
-#     #  ascend_dev="/project/asr_systems/LT2022/codeswitching/data/CMN-ENG/ASCEND/dev_notags.stm"
-#     #  ascend_train_dataset = load_asr_dataset(ascend_train, "def").shuffle(seed=42)
-#     #  ascend_dev_dataset = load_asr_dataset(ascend_dev, "def")
-#
-#     print("Loading Fisher...")
-#     fisher_train = "/project/asr_systems/LT2022/codeswitching/data/ESP-ENG/fisher/fisher_train_cs_train-transcript.stm"
-#     fisher_dev = "/project/asr_systems/LT2022/codeswitching/data/ESP-ENG/fisher/fisher_train_cs_dev-transcript.stm"
-#     shuffle_fisher_train_dataset = load_asr_dataset(fisher_train, "es").shuffle(seed=42)
-#     fisher_train_dataset = load_asr_dataset(fisher_train, "es")
-#     fisher_dev_dataset = load_asr_dataset(fisher_dev, "es")
-#
-#     fisher_mono_train = "/project/asr_systems/LT2022/codeswitching/data/ESP-ENG/fisher/fisher_train_mono-transcript.stm"
-#     shuffle_fisher_mono_train_dataset = load_asr_dataset(fisher_mono_train, "es").shuffle(seed=42)
-#
-#     fisher_all_train_dataset = concatenate_datasets([shuffle_fisher_train_dataset, shuffle_fisher_mono_train_dataset])
-#
-#     #  print("Loading TALCS ...")
-#     #  talcs_train = "/project/asr_systems/LT2022/codeswitching/data/CMN-ENG/TALCS_corpus/train_set/train_time.stm"
-#     #  talcs_dev = "/project/asr_systems/LT2022/codeswitching/data/CMN-ENG/TALCS_corpus/dev_set/dev_time.stm"
-#     #  talcs_train_dataset = load_asr_dataset(talcs_train, "def").shuffle(seed=42)
-#     #  talcs_dev_dataset = load_asr_dataset(talcs_dev, "def")
-#
-#     # csw_train_dataset = concatenate_datasets([shuffle_arzen_train_dataset, shuffle_seame_train_dataset, ascend_train_dataset, shuffle_fisher_train_dataset])
-#     # csw_dev_dataset = concatenate_datasets([arzen_dev_dataset, seame_dev_dataset, ascend_dev_dataset, fisher_dev_dataset])
-#
-#     datasets["csw_train_dataset"] = fisher_all_train_dataset  #csw_train_dataset
-#     datasets["shuffle_seame_train_dataset"] = shuffle_seame_train_dataset
-#     #datasets["talcs_train_dataset"] = talcs_train_dataset
-#
-#     # dev_list.append(csw_dev_dataset)
-#     #dev_list.append(talcs_dev_dataset)
-#     dev_list.append(fisher_dev_dataset)
-#     all_dev_dataset = concatenate_datasets(dev_list)
-#
-#     print(datasets)
-#     print("===" * 20)
-#     print(dev_list)
-#
-#     print("=====")
-#     print(f"Dev data: {all_dev_dataset}")
-#
-#     return datasets, all_dev_dataset, fisher_dev_dataset
 
+def get_train_dev(config):
+    """
+    Iterates over each dataset in 'config', prints dataset name,
+    handles 'path'/'dev_path' as single string or list of strings,
+    prints warnings if empty, and extracts other fields if present:
+      - language
+      - dev_split_size
+      - lower
+      - text_preprocessing
+    """
+    train_data_dict = {}
+    dev_data_list = []
 
-def get_data_seame(lower, debug=False):
-    datasets = {}
-
-    dev_list = list()
-
-    print("Loading SEAME...")
-    seame_train = "seame_train_clip.stm"
-    seame_train_dataset = load_asr_dataset(seame_train, "zh", lower)
-    tmp = seame_train_dataset.train_test_split(test_size=3000)
-    seame_train_dataset = tmp["train"]
-    seame_dev_dataset = tmp["test"]
-    shuffle_seame_train_dataset = seame_train_dataset.shuffle(seed=181195)
-
-    datasets["shuffle_seame_train_dataset"] = shuffle_seame_train_dataset
-
-    dev_list.append(seame_dev_dataset)
-
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-
-def get_data_fisher(lower, debug=False):
-    '''
-    Spanish-English Telephone conversations
-    '''
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading Fisher...")
-    fisher_train = "fisher_train_cs_train-transcript.stm"
-    fisher_dev = "fisher_train_cs_dev-transcript.stm"
-    shuffle_fisher_train_dataset = load_asr_dataset(fisher_train, "es", lower).shuffle(seed=42)
-    fisher_train_dataset = load_asr_dataset(fisher_train, "es", lower)
-    fisher_dev_dataset = load_asr_dataset(fisher_dev, "es", lower)
-
-    fisher_mono_train = "fisher_train_mono-transcript.stm"
-    shuffle_fisher_mono_train_dataset = load_asr_dataset(fisher_mono_train, "es", lower).shuffle(seed=42)
-
-    fisher_all_train_dataset = concatenate_datasets([shuffle_fisher_train_dataset, shuffle_fisher_mono_train_dataset])
-
-    datasets["csw_train_dataset"] = fisher_all_train_dataset  # csw_train_dataset
-
-    dev_list.append(fisher_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-
-def get_data_arzen(lower, debug=False):
-    '''
-    Arabic-English: spontaneous conversational speech corpus informal interviews, Egyptian-English; Setting: all recordings were carried out in a soundproof room.
-    '''
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading ARZEN...")
-    arzen_train = "arzen_train-clip-ntags.stm"
-    arzen_dev = "arzen_dev-clip-ntags.stm"
-
-    shuffle_arzen_train_dataset = load_asr_dataset(arzen_train, "ar", lower).shuffle(seed=42)
-    arzen_train_dataset = load_asr_dataset(arzen_train, "ar", lower)
-    arzen_dev_dataset = load_asr_dataset(arzen_dev, "ar", lower)
-
-    datasets["csw_train_dataset"] = shuffle_arzen_train_dataset
-    dev_list.append(arzen_dev_dataset)
-
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-
-def get_data_ascend(lower, debug=False):
-    '''
-  A Spontanenous Chinese-English from Hong Kong conversations about different topics; Setting: The recordings are made in a quiet classroom.
-  Both speakers are seated across one another at a distance of ∼1 meter. Each speaker is equipped with a RODE SmartLav+ clip microphone as the recording device.
-  The microphone is mounted on the speaker’s shirt collar.
-  '''
-    datasets = {}
-    dev_list = []
-
-    print("Loading ASCEND ...")
-    ascend_train = "ascend_train_notags.stm"
-    ascend_dev = "ascend_dev_notags.stm"
-
-    shuffle_ascend_train_dataset = load_asr_dataset(ascend_train, "zh", lower).shuffle(seed=42)
-    ascend_train_dataset = load_asr_dataset(ascend_train, "zh", lower)
-    ascend_dev_dataset = load_asr_dataset(ascend_dev, "zh", lower)
-
-    datasets["csw_train_dataset"] = shuffle_ascend_train_dataset
-    dev_list.append(ascend_dev_dataset)
-
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-
-def get_data_talcs(lower, debug=False):
-    '''
-  Spontaneous; Real online one-to-one English teaching Mandarin-English only teachers; different regions of China; Setting: recorded by the personal computer microphone
-  '''
-    datasets = {}
-    dev_list = []
-
-    print("Loading TALCS ...")
-    talcs_train = "talcs_train_time.stm"
-    talcs_dev = "talcs_dev_time.stm"
-
-    shuffle_talcs_train_dataset = load_asr_dataset(talcs_train, "zh", lower).shuffle(seed=42)
-    talcs_train_dataset = load_asr_dataset(talcs_train, "zh", lower)
-    talcs_dev_dataset = load_asr_dataset(talcs_dev, "zh", lower)
-
-    datasets["csw_train_dataset"] = shuffle_talcs_train_dataset
-    dev_list.append(talcs_dev_dataset)
-
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-def get_data_tunswitch(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading TunSwitch ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    tunswitch_csw_train = "tunswitch_csw_train.stm"
-    tunswitch_csw_dev = "tunswitch_csw_dev.stm"
-
+    # Extract the dictionary of datasets from the config
+    datasets_dict = config.get("datasets", {})
     
-    fisher_dev = "fisher_train_cs_dev-transcript.stm"
-    shuffle_tunswitch_csw_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar", lower).shuffle(seed=42)
-    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
-    tunswitch_csw_dev_dataset = load_asr_dataset(tunswitch_csw_dev, "ar", lower)
-  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
-  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
-
-
-    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
-
-    datasets["csw_train_dataset"] = shuffle_tunswitch_csw_train_dataset  #csw_train_dataset
-
-    dev_list.append(tunswitch_csw_dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-
-def get_data_pa(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading PA (Punjabi) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    pa_train = "pa_train.mp3.stm"
-    pa_dev = "pa_dev.mp3.stm"
-
+    if not datasets_dict:
+        print("No datasets found in config under 'datasets' key.")
+        return
     
-    shuffle_pa_train_dataset = load_asr_dataset(pa_train, "pa", lower).shuffle(seed=42)
-    #fisher_train_dataset = load_asr_dataset(tunswitch_csw_train, "ar")
-    pa_dev_dataset = load_asr_dataset(pa_dev, "pa", lower)
-  #  shuffle_tunswitch_mono_train_dataset = load_asr_dataset(tunswitch_mono_train, "ar").shuffle(seed=42)
-  #  tunswitch_mono_dev_dataset = load_asr_dataset(tunswitch_mono_dev, "ar")
-
-
-    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
-
-    datasets["csw_train_dataset"] = shuffle_pa_train_dataset  #csw_train_dataset
-
-    dev_list.append(pa_dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-    
-def get_data_sq(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading SQ (Albanian) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    sq_train = "sq_train.mp3.stm"
-    sq_dev = "sq_dev.mp3.stm"
-
-    
-    shuffle_sq_train_dataset = load_asr_dataset(sq_train, "sq", lower).shuffle(seed=42)
-    sq_dev_dataset = load_asr_dataset(sq_dev, "sq", lower)
-
-
-    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
-
-    datasets["csw_train_dataset"] = shuffle_sq_train_dataset  #csw_train_dataset
-
-    dev_list.append(sq_dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-def get_data_vi(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading VI (Vietnamese) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    vi_train = "vi_train.mp3.stm"
-    vi_dev = "vi_dev.mp3.stm"
-
-    
-    shuffle_vi_train_dataset = load_asr_dataset(vi_train, "vi", lower).shuffle(seed=42)
-    vi_dev_dataset = load_asr_dataset(vi_dev, "vi", lower)
-
-
-    #tunswitch_all_train_dataset = concatenate_datasets([shuffle_tunswitch_csw_train_dataset, shuffle_tunswitch_mono_train_dataset])
-
-    datasets["csw_train_dataset"] = shuffle_vi_train_dataset  #csw_train_dataset
-
-    dev_list.append(vi_dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-def get_data_tr(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading TR (Turkish) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    train = "tr_train.mp3.stm"
-    dev = "tr_dev.mp3.stm"
-
-    
-    shuffle_train_dataset = load_asr_dataset(train, "tr", lower).shuffle(seed=42)
-    dev_dataset = load_asr_dataset(dev, "tr", lower)
-
-    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
-
-    dev_list.append(dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-def get_data_ar(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading AR (Arabic) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    train = "ar_train.mp3.stm"
-    dev = "ar_dev.mp3.stm"
-
-    
-    shuffle_train_dataset = load_asr_dataset(train, "ar", lower).shuffle(seed=42)
-    dev_dataset = load_asr_dataset(dev, "ar", lower)
-
-    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
-
-    dev_list.append(dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-
-def get_data_fa(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading FA (Farsi/Persian) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    train = "fa_train.mp3.stm"
-    dev = "fa_dev.mp3.stm"
-
-    
-    shuffle_train_dataset = load_asr_dataset(train, "fa", lower).shuffle(seed=42)
-    dev_dataset = load_asr_dataset(dev, "fa", lower)
-
-    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
-
-    dev_list.append(dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-def get_data_uz(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading UZ (Uzbek) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    train = "uz_train.mp3.stm"
-    dev = "uz_dev.mp3.stm"
-
-    
-    shuffle_train_dataset = load_asr_dataset(train, "uz", lower).shuffle(seed=42)
-    dev_dataset = load_asr_dataset(dev, "uz", lower)
-
-    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
-
-    dev_list.append(dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-def get_data_lv(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading LV (Latvian) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    train = "lv_train.mp3.stm"
-    dev = "lv_dev.mp3.stm"
-
-    
-    shuffle_train_dataset = load_asr_dataset(train, "lv", lower).shuffle(seed=42)
-    dev_dataset = load_asr_dataset(dev, "lv", lower)
-
-    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
-
-    dev_list.append(dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-def get_data_fi(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading FI (Finish) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    train = "fi_train.mp3.stm"
-    dev = "fi_dev.mp3.stm"
-
-    
-    shuffle_train_dataset = load_asr_dataset(train, "fi", lower).shuffle(seed=42)
-    dev_dataset = load_asr_dataset(dev, "fi", lower)
-
-    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
-
-    dev_list.append(dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-def get_data_be(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading BE (Belarusian) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    train = "be_train.mp3.stm"
-    dev = "be_dev.mp3.stm"
-
-    
-    shuffle_train_dataset = load_asr_dataset(train, "be", lower).shuffle(seed=42)
-    dev_dataset = load_asr_dataset(dev, "be", lower)
-
-    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
-
-    dev_list.append(dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-def get_data_et(lower, debug=False):
-    datasets = {}
-
-    dev_list = []
-
-    print("Loading ET (Estonian) ...")
-   # tunswitch_mono_train = "tunswitch_mono_train.stm"
-   # tunswitch_mono_dev = "tunswitch_mono_dev.stm"
-    train = "et_train.mp3.stm"
-    dev = "et_dev.mp3.stm"
-
-    
-    shuffle_train_dataset = load_asr_dataset(train, "et", lower).shuffle(seed=42)
-    dev_dataset = load_asr_dataset(dev, "et", lower)
-
-    datasets["csw_train_dataset"] = shuffle_train_dataset  #csw_train_dataset
-
-    dev_list.append(dev_dataset)
-   # dev_list.append(tunswitch_mono_dev_dataset)
-    all_dev_dataset = concatenate_datasets(dev_list)
-
-    print(datasets)
-    print("===" * 20)
-    print(dev_list)
-
-    print("=====")
-    print(f"Dev data: {all_dev_dataset}")
-
-    return datasets, all_dev_dataset
-
-
-flex_datasets = {
-    "ar_cv": {"train": ["ar_cv_train_length.stm"], "dev": ["ar_cv_dev_length.stm"]}, #common voice
-    "ar_mgb": {"train": ["ar_mgb_mgb-clip.stm"], "dev": None}, #mgb aljazeera
-    "ar_ldclv": {"train": ["ar_ldclv_train_split_clip.stm"], "dev": None}, #ldc2006S29 Levantine arabic
-    "ar_mediaspeech": {"train":  ["ar_mediaspeech_tr.mediaspeech.stm"], "dev": None}, # mediaspeech
-    "ar_juansy": {"train": ["ar_juansy_juan-syrian-clip.stm"], "dev": None}, #levantine by juan
-    "ar_mini": {"train": ["ar_mini_mini-clip.stm"], "dev": None}, #mini questionaire
-    "ar_quran": {"train": ["ar_quran_train.not.stm"], "dev": None}, #Quran arabic
-    "ar_tunmsa": {"train": ["ar_tunmsa_train.stm"], "dev": ["ar_tunmsa_dev.stm"]}, #tunisian msa
-    "ar_tunmsaslt": {"train": ["ar_tunmsaslt_train.asr.stm"], "dev": ["ar_tunmsaslt_dev.asr.stm"]}, # tunisian msa slt ldc2022e01
-    "ar_clartts":  {"train": ["ar_clartts_train.stm"], "dev": None},
-    "ar_linto": {"train": ["ar_linto_train.stm"], "dev": None},
-    "ar_masc": {"train": ["ar_masc_train.stm"], "dev": ["ar_masc_validation.stm"]},
-    }
-
-def full_path_dataset(dataset, lower):
-    datasets = {}
-    train_dataset = load_asr_dataset(dataset, "ar", lower).shuffle(seed=42)
-    total_samples = len(train_dataset)
-    split_size = min(3000, int(0.1 * total_samples))  # Use 10% of the data or 3000 samples max
-    if split_size > 0:
-        tmp = train_dataset.train_test_split(test_size=split_size)
-        train_data = tmp["train"]
-        dev_data = tmp["test"]
-    else:
-        print(f"Warning: Not enough data to create a dev split for {dataset}. Using all data for training.")
-    datset_name = dataset.rsplit("/",1)[-1].rsplit(".", 1)[0]
-    datasets[f"train_{datset_name}"] = train_dataset
-    return datasets, dev_data
-
-
-def get_data_flex(dataset, lower, debug=False):    
-    datasets = {}
-
-    dev_list = []
-    
-    if "/" in dataset:
-        return full_path_dataset(dataset, lower)
-
-    dataset = dataset.lower()
-    lang = dataset.split("_")[0]
-    # Get dataset paths from the dictionary
-    dataset_info = flex_datasets.get(dataset, {})
-    
-    # Process train datasets
-    train_datasets = []
-    if "train" in dataset_info and dataset_info["train"]:
-        train_files = dataset_info["train"]
-        for train_file in train_files:
-            train_datasets.append(load_asr_dataset(train_file, lang, lower))
-    
-    # Concatenate multiple train datasets if needed
-    train_data = None
-    if train_datasets:
-        train_data = train_datasets[0] if len(train_datasets) == 1 else concatenate_datasets(train_datasets)
-        train_data = train_data.shuffle(seed=42)  # Shuffle train dataset
-
-    # Process dev datasets
-    dev_datasets = []
-    if "dev" in dataset_info and dataset_info["dev"]:
-        dev_files = dataset_info["dev"]
-        for dev_file in dev_files:
-            dev_datasets.append(load_asr_dataset(dev_file, lang, lower))
+    for dataset_name, dataset_config in datasets_dict.items():
+        print(f"\nProcessing dataset: '{dataset_name}'")
+
+        # Extract fields with defaults
+        language = dataset_config.get("language", None)
+        dev_split_size = dataset_config.get("dev_split_size", 0)
+        lower = dataset_config.get("lower", False)
+        text_preprocessing = dataset_config.get("text_preprocessing", None)
+        remove_punct = dataset_config.get("remove_punct", False)
+
+        # Path can be string, list, or missing
+        raw_path = dataset_config.get("path", "")
+        if isinstance(raw_path, str):
+            # Convert single string to list if non-empty
+            path_list = [raw_path] if raw_path else []
+        elif isinstance(raw_path, list):
+            path_list = raw_path
+        else:
+            print(f"  WARNING: 'path' for '{dataset_name}' is neither string nor list. Found type: {type(raw_path)}")
+            path_list = []
+
+        # Dev path can be string, list, or missing
+        raw_dev_path = dataset_config.get("dev_path", "")
+        if isinstance(raw_dev_path, str):
+            dev_path_list = [raw_dev_path] if raw_dev_path else []
+        elif isinstance(raw_dev_path, list):
+            dev_path_list = raw_dev_path
+        else:
+            print(f"  WARNING: 'dev_path' for '{dataset_name}' is neither string nor list. Found type: {type(raw_dev_path)}")
+            dev_path_list = []
+
+        # Check if we ended up with any valid paths
+        if not path_list:
+            print(f"  WARNING: No data path provided for '{dataset_name}'!")
+
+        # Print the final extracted values
+        print(f"  path               = {path_list}")
+        print(f"  dev_path           = {dev_path_list}")
+        print(f"  language           = {language}")
+        print(f"  dev_split_size     = {dev_split_size}")
+        print(f"  lower              = {lower}")
+        print(f"  remove_punct       = {remove_punct}")
+        print(f"  text_preprocessing = {text_preprocessing}")
+
+        train_list = list()
+        dev_list = list()
+
+        for tr_path in path_list:
+            train_data = load_asr_dataset(tr_path, language, lower, remove_punct).shuffle(seed=seed)
+            if len(dev_path_list) == 0 and dev_split_size != 0:
+                if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(train_data)))  # Use x% of the data or 3000 samples max
+                tmp = train_data.train_test_split(test_size=dev_split_size)
+                train_data = tmp["train"]
+                dev_data = tmp["test"]
+                dev_list.append(dev_data) 
+
+            train_list.append(train_data)
+
+           
+        if len(train_list) > 0:
+            train_data_dict[dataset_name] = concatenate_datasets(train_list).shuffle(seed=seed)
+       
+        for dev_path in dev_path_list:
+            dev_data = load_asr_dataset(dev_path, language, lower, remove_punct)
+            if dev_split_size != 0:
+                if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(train_data)))  # Use x% of the data or 3000 samples max
+                dev_data = dev_data.shuffle(seed=seed)
+                tmp = dev_data.train_test_split(test_size=dev_split_size)
+                dev_data = tmp["test"]
+
+            dev_list.append(dev_data)
+
+        if len(dev_list) > 0:
+            dev_data_list.append(concatenate_datasets(dev_list))
+
+    dev_data_concat = concatenate_datasets(dev_data_list)
+    return train_data_dict, dev_data_concat
+      
 
         
-    dev_data = None
-    if dev_datasets:
-        dev_data = dev_datasets[0] if len(dev_datasets) == 1 else concatenate_datasets(dev_datasets)
-    # If no dev dataset exists, create one from the train dataset
-    if dev_data is None and train_data is not None:
-        total_samples = len(train_data)
-        split_size = min(3000, int(0.1 * total_samples))  # Use 10% of the data or 3000 samples max
-        if split_size > 0:
-            tmp = train_data.train_test_split(test_size=split_size)
-            train_data = tmp["train"]
-            dev_data = tmp["test"]
-        else:
-            print(f"Warning: Not enough data to create a dev split for {dataset}. Using all data for training.")
 
-    datasets[f"train_{dataset}"] = train_data  #csw_train_dataset
-    return datasets, dev_data
+		
 
-    
-    
+

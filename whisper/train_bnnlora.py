@@ -49,8 +49,8 @@ parser.add_argument('-low_rank_modules', type=str, default="qv",
                     help='Whisper Model size: ["qv", "all-linear"')
 parser.add_argument('-lora_rank', type=int, default=32,
                     help='The rank of the lora matrices')
-parser.add_argument('-datasets', required=True, default=[], type=str,
-                        nargs="+", help="Paths to datasets")
+parser.add_argument('-data_config', type=str, required=True,
+                    help="Path to the dataset config fule (YAML or JSON).")
 parser.add_argument('-lower_case', action='store_true',
                     help="set if you want to lower case transcripts")
 parser.add_argument('-output_dir', default="outputs",
@@ -104,194 +104,19 @@ parser.add_argument('-disable_safetensors', action='store_true',
 args = parser.parse_args()
 print(args)
 
-def get_train_dev(dataset, lower_case):
-    # TODO: add option to
-    if dataset.lower() == 'seame':
-        from prepare_data import get_data_seame
-    
-        all_tr_dataset, all_dev_dataset = get_data_seame(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'fisher':
-        from prepare_data import get_data_fisher
-    
-        all_tr_dataset, all_dev_dataset = get_data_fisher(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'arzen':
-        from prepare_data import get_data_arzen
-    
-        all_tr_dataset, all_dev_dataset = get_data_arzen(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'ascend':
-        from prepare_data import get_data_ascend
-    
-        all_tr_dataset, all_dev_dataset = get_data_ascend(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'talcs':
-        from prepare_data import get_data_talcs
-    
-        all_tr_dataset, all_dev_dataset = get_data_talcs(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'tunswitch':
-        from prepare_data import get_data_tunswitch
-    
-        all_tr_dataset, all_dev_dataset = get_data_tunswitch(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'pa':
-        from prepare_data import get_data_pa
-    
-        all_tr_dataset, all_dev_dataset = get_data_pa(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'sq':
-        from prepare_data import get_data_sq
-    
-        all_tr_dataset, all_dev_dataset = get_data_sq(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'vi':
-        from prepare_data import get_data_vi
-    
-        all_tr_dataset, all_dev_dataset = get_data_vi(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'tr':
-        from prepare_data import get_data_tr
-    
-        all_tr_dataset, all_dev_dataset = get_data_tr(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'ar':
-        from prepare_data import get_data_ar
-    
-        all_tr_dataset, all_dev_dataset = get_data_ar(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'uz':
-        from prepare_data import get_data_uz
-    
-        all_tr_dataset, all_dev_dataset = get_data_uz(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'fa':
-        from prepare_data import get_data_fa
-    
-        all_tr_dataset, all_dev_dataset = get_data_fa(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    
-    elif dataset.lower() == 'lv':
-        from prepare_data import get_data_lv
-    
-        all_tr_dataset, all_dev_dataset = get_data_lv(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'fi':
-        from prepare_data import get_data_fi
-    
-        all_tr_dataset, all_dev_dataset = get_data_fi(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'be':
-        from prepare_data import get_data_be
-    
-        all_tr_dataset, all_dev_dataset = get_data_be(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    elif dataset.lower() == 'et':
-        from prepare_data import get_data_et
-    
-        all_tr_dataset, all_dev_dataset = get_data_et(lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-    
-    else:
-        from prepare_data import get_data_flex
-        all_tr_dataset, all_dev_dataset = get_data_flex(dataset, lower_case, debug=False)
-        print("Training data: {}".format(all_tr_dataset))
-        print("DEV data: {}".format(all_dev_dataset))
-        training_uid_mapper = None
-        dev_uid_mapper = None
-        if len(all_tr_dataset) ==0:
-            raise NotImplementedError("Unknown dataset: {}".format(dataset))
-
-    return all_tr_dataset, all_dev_dataset
-
-
-def merge_dicts(dict_list):
-    new_dict = {}
-    key_counts = defaultdict(int)
-
-    for d in dict_list:
-        for key, value in d.items():
-            if key in new_dict:
-                key_counts[key] += 1
-                new_dict[f"{key_counts[key]}_{key}"] = value
-            else:
-                new_dict[key] = value
-                key_counts[key] = 0  # Initialize counter
-
-    return new_dict
 
 training_uid_mapper = None
 dev_uid_mapper = None
 
-train_dicts_list = list()
-dev_datasets_list = list()
-dataset_names = list()
-for dataset in args.datasets:
-    print(f"[INFO] Loading {dataset}...")
-    train_dict, dev_dataset = get_train_dev(dataset, args.lower_case)
-    train_dicts_list.append(train_dict)
-    dev_datasets_list.append(dev_dataset)
-    if "/" in dataset:
-        dataset_names.append(dataset.rsplit("/", 1)[-1].rsplit(".", 1)[0])
-    else:
-        dataset_names.append(dataset)
+# 2. Load config from YAML (or JSON)
+with open(args.data_config, "r") as f:
+    data_config = yaml.safe_load(f)
 
-all_tr_dataset = merge_dicts(train_dicts_list)
-all_dev_dataset = concatenate_datasets(dev_datasets_list)
-print(f"[INFO] combined training datasets: {all_tr_dataset}")
+# 3. Call get_train_dev with the loaded config
+all_tr_dataset, all_dev_dataset = get_train_dev(data_config)
 
+print("Training dataset loaded:", all_tr_dataset)
+print("Development dataset loaded:", all_dev_dataset)
 
 # training_uid_mapper = {key: idx for idx, key in enumerate(concat_tr_dataset["uid"])}
 # dev_uid_mapper = {key: idx for idx, key in enumerate(all_dev_dataset["uid"])}
@@ -529,8 +354,8 @@ else:
     raise NotImplementedError
 
 
-output_dir = args.output_dir + "/model_%s_%s_%s_%s" % (
-    args.model_size, "-".join(dataset_names), args.low_rank_type, args.low_rank_modules)
+output_dir = args.output_dir + "/model_%s_%s_%s" % (
+    args.model_size, args.low_rank_type, args.low_rank_modules)
 
 # TODO: logging_dir
 training_args = Seq2SeqTrainingArguments(
