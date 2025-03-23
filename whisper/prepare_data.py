@@ -157,7 +157,8 @@ def detect_language(text, mapper):
     return tmp
 
 
-def load_asr_dataset(file_path, language, lower, remove_punct):
+def load_asr_dataset(file_path, language,
+                     lower, remove_punct, special_char_removal=True):
     csw = True
     normalizers = []
     if language == "ar":
@@ -194,7 +195,8 @@ def load_asr_dataset(file_path, language, lower, remove_punct):
         duration = float(duration)  # ms
         if duration < 500 or duration > 20000: skipped += 1; continue
 
-        transcript = remove_special_characters(transcript, lower, remove_punct)
+        if special_char_removal:
+            transcript = remove_special_characters(transcript, lower, remove_punct)
         if transcript.strip() == "":
             skipped += 1
             continue
@@ -356,7 +358,7 @@ def do_csw_backup(train_list, pseudo_csw_amount, train=True):
 
 
 
-def get_train_dev(config):
+def get_train_dev(config, special_char_removal=True):
     """
     Iterates over each dataset in 'config', prints dataset name,
     handles 'path'/'dev_path' as single string or list of strings,
@@ -424,7 +426,9 @@ def get_train_dev(config):
         dev_list = list()
 
         for tr_path in path_list:
-            train_data = load_asr_dataset(tr_path, language, lower, remove_punct).shuffle(seed=seed)
+            train_data = load_asr_dataset(tr_path, language,
+                                          lower, remove_punct,
+                                          special_char_removal=special_char_removal).shuffle(seed=seed)
             if len(dev_path_list) == 0 and dev_split_size != 0:
                 if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(train_data)))  # Use x% of the data or 3000 samples max
                 tmp = train_data.train_test_split(test_size=dev_split_size)
@@ -439,7 +443,8 @@ def get_train_dev(config):
             train_data_dict[dataset_name] = concatenate_datasets(train_list).shuffle(seed=seed)
        
         for dev_path in dev_path_list:
-            dev_data = load_asr_dataset(dev_path, language, lower, remove_punct)
+            dev_data = load_asr_dataset(dev_path, language,
+                                        lower, remove_punct, special_char_removal=special_char_removal)
             if dev_split_size != 0:
                 if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(train_data)))  # Use x% of the data or 3000 samples max
                 dev_data = dev_data.shuffle(seed=seed)

@@ -106,6 +106,7 @@ mapper_orig = {
     "ja": "<|ja|>",
     "zh": "<|zh|>",
     "tr": "<|tr|>",
+    "bn": "<|bn|>",
     "mix": "mix",
     "<unk>": "<unk>",
     "<eos>": "<eos>",
@@ -139,7 +140,7 @@ def filter_function(example):
     return min_length <= array_length <= max_length
 
 
-def load_asr_dataset(file_path, language):
+def load_asr_dataset(file_path, language, special_char_removal=True):
     # Read the content of the STM file
     with open(file_path, 'r', encoding='utf-8') as stm_file:
         lines = stm_file.readlines()
@@ -164,7 +165,10 @@ def load_asr_dataset(file_path, language):
         # language_ids = detect_language(transcript, mapper_orig)
         language_ids = [mapper_orig[language[0]] for _ in transcript.split()]
 
-        transcript = remove_special_characters(transcript)
+        if special_char_removal:
+            transcript = remove_special_characters(transcript)
+        else:
+            print("skip the remove special characters")
         # if transcript.strip() == "":
         #     skipped += 1; continue
         transcript = " ".join(transcript.split())

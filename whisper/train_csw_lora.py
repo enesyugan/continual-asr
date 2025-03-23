@@ -71,9 +71,17 @@ parser.add_argument('-spec_augment', action='store_true',
 parser.add_argument('-label_smoothing', type=float, default=0.0,
                     help="""Label smoothing""")
 parser.add_argument('-no_progress_bar', action='store_true',
-                    help="Use spec augmentation")
+                    help="disable the progress bar (to use with slurm)")
 parser.add_argument('-batch_size', type=int, default=8,
                     help='Batch size during training (per device)')
+parser.add_argument('-max_steps', type=int, default=30000,
+                    help='Max number of update steps')
+parser.add_argument('-save_steps', type=int, default=100,
+                    help='Number of steps per saving a checkpoint')
+parser.add_argument('-eval_steps', type=int, default=100,
+                    help='Number of steps per evaluation on the dev set')
+parser.add_argument('-logging_steps', type=int, default=10,
+                    help='Number of steps per evaluation on the dev set')
 parser.add_argument('-gradient_accumulation', type=int, default=2,
                     help='Number of gradient accumulation steps')
 
@@ -99,6 +107,9 @@ parser.add_argument('-freeze_embedding', action='store_true',
 parser.add_argument('-disable_safetensors', action='store_true',
                     help="Use exponential moving average during training")
 
+parser.add_argument('-keep_special_character', action='store_true',
+                        help="Ignore the special character removal")
+
 args = parser.parse_args()
 print(args)
 
@@ -111,12 +122,11 @@ with open(args.data_config, "r") as f:
     data_config = yaml.safe_load(f)
 
 # 3. Call get_train_dev with the loaded config
-all_tr_dataset, all_dev_dataset = get_train_dev(data_config)
+all_tr_dataset, all_dev_dataset = get_train_dev(data_config,
+                                                special_char_removal= not args.keep_special_character)
 
 print("Training dataset loaded:", all_tr_dataset)
 print("Development dataset loaded:", all_dev_dataset)
-
-
 
 # training_uid_mapper = {key: idx for idx, key in enumerate(concat_tr_dataset["uid"])}
 # dev_uid_mapper = {key: idx for idx, key in enumerate(all_dev_dataset["uid"])}
@@ -432,7 +442,7 @@ training_args = Seq2SeqTrainingArguments(
     gradient_accumulation_steps=args.gradient_accumulation,  # increase by 2x for every 2x decrease in batch size
     learning_rate=learning_rate,  # 1e-3,#5e-5,
     warmup_steps=warmup_steps,
-    # max_steps=180000,
+    max_steps=args.max_steps,
     ddp_find_unused_parameters=False,
     num_train_epochs=100,
     gradient_checkpointing=False,
@@ -444,9 +454,9 @@ training_args = Seq2SeqTrainingArguments(
     predict_with_generate=True,
     generation_max_length=225,
     save_total_limit=1,
-    save_steps=100,
-    eval_steps=100,
-    logging_steps=10,
+    save_steps=args.save_steps,
+    eval_steps=args.eval_steps,
+    logging_steps=args.logging_steps,
     eval_accumulation_steps=100,
     dataloader_num_workers=4,
     per_device_eval_batch_size=32,

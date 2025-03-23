@@ -187,7 +187,7 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
     model.generation_config.forced_decoder_ids = forced_decoder_ids
     model.generation_config.num_return_sequences = 1
     model.generation_config.num_beams = beam_size
-    model.generation_config.no_repeat_ngram_size = 4
+    model.generation_config.no_repeat_ngram_size = 0
     model.generation_config.max_new_tokens = 255
 
     language_tokens = [t for t in processor.tokenizer.additional_special_tokens if len(t) == 6]
@@ -278,12 +278,17 @@ if __name__ == "__main__":
     parser.add_argument('-lora_weights', required=False, default="", type=str,
                         help="Efficients for each lora set")
 
+    parser.add_argument('-keep_special_character', action='store_true',
+                        help="Ignore the special character removal")
+
     args = parser.parse_args()
 
     test_path = args.test_stm
 
     # for arzen it should be ar en
-    test_dataset = load_asr_dataset(test_path, language=["ar", "en"])
+    language_list=["en"]
+    test_dataset = load_asr_dataset(test_path, language=language_list,
+                                    special_char_removal=not args.keep_special_character)
     print(test_dataset)
 
     num_gpus = torch.cuda.device_count()
@@ -327,7 +332,8 @@ if __name__ == "__main__":
 
     clean_predictions = list()
     for text in predictions_lst:
-        text = remove_special_characters(text)
+        if not args.keep_special_character:
+            text = remove_special_characters(text)
         clean_predictions.append(text)
 
     outdir = os.path.basename(args.test_stm).replace(".stm", "")
