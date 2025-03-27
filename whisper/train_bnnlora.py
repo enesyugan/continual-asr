@@ -354,6 +354,11 @@ else:
     raise NotImplementedError
 
 
+if "/" in args.model_size:
+    model_size = args.model_size.replace("/", "_")
+else:
+    model_size = args.model_size
+
 output_dir = args.output_dir + "/model_%s_%s_%s" % (
     args.model_size, args.low_rank_type, args.low_rank_modules)
 
