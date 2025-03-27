@@ -30,6 +30,7 @@ from torch import nn
 
 from memory_efficient_whisper import create_whisper_model
 from utils import DataCollatorSpeechSeq2SeqWithPadding
+from prepare_data import get_train_dev
 
 local_rank = int(os.environ.get("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}")
