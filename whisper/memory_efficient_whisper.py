@@ -413,11 +413,16 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
                 loss = loss_fct(logits, labels)
                 ce_loss = loss
 
-            kl_loss = self._compute_kl() * self.kl_scale
+            # kl_loss = self._compute_kl() * self.kl_scale
+            kl_loss = self._compute_kl()
+            kl_loss_data = kl_loss.item()
             #print(f"ce: {ce_loss} kl: {kl_loss}", flush=True)
-            ce_loss = ce_loss + kl_loss
+            loss = ce_loss + kl_loss * self.kl_scale
 
-            if kl_loss != 0.0: additional_losses["kl_loss"] = kl_loss
+            ce_loss_data = ce_loss.item()
+            additional_losses["ce_loss"] = ce_loss_data
+            if self.kl_scale > 0.0:
+                additional_losses["kl_loss"] = kl_loss_data
 
             if teacher_lm_logits is not None:
 

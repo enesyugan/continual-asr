@@ -31,6 +31,9 @@ from torch import nn
 from memory_efficient_whisper import create_whisper_model
 from utils import DataCollatorSpeechSeq2SeqWithPadding
 
+import yaml
+from prepare_data import get_train_dev
+
 local_rank = int(os.environ.get("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}")
 
@@ -100,6 +103,9 @@ parser.add_argument('-freeze_embedding', action='store_true',
 
 parser.add_argument('-disable_safetensors', action='store_true',
                     help="Use exponential moving average during training")
+
+parser.add_argument('-max_steps', type=int, default=30000,
+                    help='Max number of update steps')
 
 args = parser.parse_args()
 print(args)
@@ -365,7 +371,7 @@ training_args = Seq2SeqTrainingArguments(
     gradient_accumulation_steps=args.gradient_accumulation,  # increase by 2x for every 2x decrease in batch size
     learning_rate=learning_rate,  # 1e-3,#5e-5,
     warmup_steps=warmup_steps,
-    # max_steps=180000,
+    max_steps=args.max_steps,
     ddp_find_unused_parameters=False,
     num_train_epochs=100,
     gradient_checkpointing=False,
