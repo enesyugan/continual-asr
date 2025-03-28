@@ -30,9 +30,9 @@ from torch import nn
 
 from memory_efficient_whisper import create_whisper_model
 from utils import DataCollatorSpeechSeq2SeqWithPadding
+from prepare_data import get_train_dev
 
 import yaml
-from prepare_data import get_train_dev
 
 local_rank = int(os.environ.get("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}")
@@ -79,6 +79,14 @@ parser.add_argument('-no_progress_bar', action='store_true',
                     help="Use spec augmentation")
 parser.add_argument('-batch_size', type=int, default=8,
                     help='Batch size during training (per device)')
+parser.add_argument('-max_steps', type=int, default=30000,
+                    help='Max number of update steps')
+parser.add_argument('-save_steps', type=int, default=100,
+                    help='Number of steps per saving a checkpoint')
+parser.add_argument('-eval_steps', type=int, default=100,
+                    help='Number of steps per evaluation on the dev set')
+parser.add_argument('-logging_steps', type=int, default=10,
+                    help='Number of steps per evaluation on the dev set')
 parser.add_argument('-gradient_accumulation', type=int, default=2,
                     help='Number of gradient accumulation steps')
 
@@ -107,7 +115,19 @@ parser.add_argument('-disable_safetensors', action='store_true',
 parser.add_argument('-max_steps', type=int, default=30000,
                     help='Max number of update steps')
 
+parser.add_argument('-keep_special_character', action='store_true',
+                        help="Ignore the special character removal")
+
+parser.add_argument('-test_mode', action='store_true',
+                        help="Test mode sets eval, logging, save steps to 1 and max steps 2")
+
 args = parser.parse_args()
+
+if args.test_mode:
+    args.max_steps = 2
+    args.save_steps = 1
+    args.eval_steps = 1
+    args.logging_steps = 1
 print(args)
 
 
@@ -119,7 +139,8 @@ with open(args.data_config, "r") as f:
     data_config = yaml.safe_load(f)
 
 # 3. Call get_train_dev with the loaded config
-all_tr_dataset, all_dev_dataset = get_train_dev(data_config)
+all_tr_dataset, all_dev_dataset = get_train_dev(data_config,
+                                                special_char_removal= not args.keep_special_character)
 
 print("Training dataset loaded:", all_tr_dataset)
 print("Development dataset loaded:", all_dev_dataset)
@@ -360,6 +381,11 @@ else:
     raise NotImplementedError
 
 
+if "/" in args.model_size:
+    model_size = args.model_size.replace("/", "_")
+else:
+    model_size = args.model_size
+
 output_dir = args.output_dir + "/model_%s_%s_%s" % (
     args.model_size, args.low_rank_type, args.low_rank_modules)
 
@@ -383,9 +409,9 @@ training_args = Seq2SeqTrainingArguments(
     predict_with_generate=True,
     generation_max_length=225,
     save_total_limit=1,
-    save_steps=100,
-    eval_steps=100,
-    logging_steps=10,
+    save_steps=args.save_steps,
+    eval_steps=args.eval_steps,
+    logging_steps=args.logging_steps,
     eval_accumulation_steps=100,
     dataloader_num_workers=4,
     per_device_eval_batch_size=32,
