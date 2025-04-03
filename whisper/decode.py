@@ -58,7 +58,8 @@ def split_dataset(dataset, num_chunks):
 
 
 def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_path,
-                          tgt_lang, custom_lora, device_id, batch_size, beam_size, total_samples,
+                          tgt_lang, custom_lora, device_id, batch_size, beam_size,
+                          no_repeat_ngram_size, total_samples,
                           no_progress_bar, lora_weights, result_queue):
     """Loads model on specific GPU and decodes its chunk."""
     torch.cuda.set_device(device_id)
@@ -83,7 +84,7 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
             main_model = PeftModel.from_pretrained(main_model, model_id=lora_paths[0], config=lora_config)
         else:
             main_model = PeftModel.from_pretrained(main_model, lora_paths[0])
-        main_model.merge_and_unload()
+            main_model.merge_and_unload()
         # checkpoint = main_model.state_dict()
 
         if len(lora_weights) > 0:
@@ -187,7 +188,7 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
     model.generation_config.forced_decoder_ids = forced_decoder_ids
     model.generation_config.num_return_sequences = 1
     model.generation_config.num_beams = beam_size
-    model.generation_config.no_repeat_ngram_size = 0
+    model.generation_config.no_repeat_ngram_size = no_repeat_ngram_size
     model.generation_config.max_new_tokens = 255
 
     language_tokens = [t for t in processor.tokenizer.additional_special_tokens if len(t) == 6]
@@ -281,6 +282,9 @@ if __name__ == "__main__":
     parser.add_argument('-keep_special_character', action='store_true',
                         help="Ignore the special character removal")
 
+    parser.add_argument('-no_repeat_ngram_size', type=int, default=4,
+                        help='Prevent ngram repetition with this size.')
+
     args = parser.parse_args()
 
     test_path = args.test_stm
@@ -307,7 +311,8 @@ if __name__ == "__main__":
             process = mp.Process(target=load_model_and_decode,
                                  args=(gpu_id, dataset_chunks[gpu_id],
                                        args.model_path, args.lora_path, args.tokenizer_path,
-                                       args.tgt_lang, args.custom_lora, gpu_id, args.batch_size, args.beam_size,
+                                       args.tgt_lang, args.custom_lora, gpu_id,
+                                       args.batch_size, args.beam_size, args.no_repeat_ngram_size,
                                        total_size, args.no_progress_bar, args.lora_weights,
                                        result_queue))
             process.start()
@@ -315,7 +320,8 @@ if __name__ == "__main__":
 
     else:
         load_model_and_decode(0, test_dataset, args.model_path, args.lora_path, args.tokenizer_path,
-                              args.tgt_lang, args.custom_lora, 0, args.batch_size, args.beam_size, total_size,
+                              args.tgt_lang, args.custom_lora, 0,
+                              args.batch_size, args.beam_size, args.no_repeat_ngram_size, total_size,
                               args.no_progress_bar, args.lora_weights, result_queue)
 
     # Collect results

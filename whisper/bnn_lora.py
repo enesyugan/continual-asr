@@ -21,23 +21,53 @@ class BayesianLoraConfig(LoraConfig):
         self.prior_std = prior_std
         self.custom_module_class_name = custom_module_class_name
 
-class BayesianRankParam(nn.Module):
+# class BayesianRankParam(nn.Module):
+# class BayesianFC(nn.Module):
+class BLoBLinear(nn.Module):
     """
+    Bayesian Low-Rank by Backprop (a version of BBB)
     Represents a diagonal Gaussian for a 2D parameter shape (rows, cols).
     We store mu, log_sigma, and sample them each forward call.
     """
-    def __init__(self, rows, cols, prior_std=0.01, init_mu=0.0, init_log_sigma=-5.0):
+    def __init__(self, rows, cols,
+                 prior_std=0.01,
+                 init_log_sigma=-5.5):
         super().__init__()
         self.rows = cols
         self.cols = rows
-        self.prior_std = prior_std
+
+        # This represents the bayesian-ed A matrix in Lora. B is kept deterministic.
+
+        self.prior_std = prior_std   # 0.2 as in the paper
+        self.init_log_sigma = init_log_sigma
+
+        if self.init_log_sigma < 0:
+            self.sigma_type = "log"
+
+        else:
+            self.sigma_type = "sqrt"
+
+        # mode = deterministic (mu only) or stochastic
 
         # The means and log-std
         self.mu = nn.Parameter(torch.zeros(self.rows, self.cols))
-        init_log_sigma = math.log(self.prior_std)
         self.log_sigma = nn.Parameter(torch.full((self.rows, self.cols), init_log_sigma))
 
+        self.reset_parameters()
         # You might add custom inits here if desired
+
+    def reset_parameters(self) -> None:
+        # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
+        # uniform(-1/sqrt(in_features), 1/sqrt(in_features)). For details, see
+        # https://github.com/pytorch/pytorch/issues/57109
+        nn.init.kaiming_uniform_(self.mu, a=math.sqrt(5))
+
+        if self.sigma_type == "log":
+            # self.log_sigma.data.fill_(self.init_log_sigma)
+            nn.init.uniform_(self.log_sigma, self.init_log_sigma, self.init_log_sigma+1)
+        else:
+            nn.init.uniform_(self.log_sigma, self.init_log_sigma / math.sqrt(2), self.init_log_sigma)
+
 
     @property
     def weight(self) -> torch.Tensor:
@@ -45,9 +75,22 @@ class BayesianRankParam(nn.Module):
         Whenever someone accesses x.weight, we return the 'merged' parameter
         from multiple samples. By default, let's do 5 samples.
         """
-        return self.sample_and_merge(number_of_samples=5)
+        # return self.sample_and_merge(number_of_samples=32)
+        return self.mu
 
-    def sample_and_merge(self, number_of_samples: int = 5) -> torch.Tensor:
+    @property
+    def sigma(self) -> torch.Tensor:
+        """
+        Whenever someone accesses x.weight, we return the 'merged' parameter
+        from multiple samples. By default, let's do 5 samples.
+        """
+        if self.sigma_type == "log":
+            # print("Softplus ...", flush=True)
+            return F.softplus(self.log_sigma)
+        else:
+            return self.log_sigma ** 2
+
+    def sample_and_merge(self, number_of_samples: int = 32) -> torch.Tensor:
         """
         Draw multiple samples from the posterior, average them, and return
         a single "merged" weight matrix. This can be used to produce a final
@@ -59,48 +102,134 @@ class BayesianRankParam(nn.Module):
         Returns:
             torch.Tensor of shape [rows, cols]: The averaged weight matrix.
         """
-        # We'll accumulate samples in a sum and then divide.
-        device = self.mu.device
-        sum_matrix = torch.zeros_like(self.mu, device=device)
-    
-        sigma = torch.exp(self.log_sigma)  # pre-compute once
-        for _ in range(number_of_samples):
-            eps = torch.randn_like(self.mu)
-            sample = self.mu + sigma * eps
-            sum_matrix += sample
-    
-        # Compute the average
-        average_matrix = sum_matrix / number_of_samples
-        return average_matrix
+        raise NotImplementedError
         
-            
 
     def forward(self, x):
         """
         Returns a [rows, cols] sample from the posterior.
         """
-        eps = torch.randn_like(self.mu)
-        sigma = torch.exp(self.log_sigma)
-        A_B = self.mu +sigma *eps
-        return F.linear(x, A_B)
+        # eps = torch.randn_like(self.mu)
+        # sigma = torch.exp(self.log_sigma)
+        # A_B = self.mu +sigma *eps
+        # print("forward bayes lora")
+        # return F.linear(x, self.mu)
+
+        if self.training:
+            eps = torch.randn_like(self.mu)
+            sigma = self.sigma
+
+            # w = self.mu + sigma * eps
+            #
+            # return F.linear(x, w)
+            # # sigma = torch.exp(self.log_sigma)
+            # # w = self.mu + sigma * eps
+            #
+            # # what we should do here is:
+            #
+            lora_output = F.linear(x, self.mu)
+
+            noisy_weight = eps * sigma
+
+            # sample the random signs for flipout
+            with torch.no_grad():
+
+                # rademacher noise
+                r_A = 2 * torch.randint(0, 2, x.shape, device=x.device, dtype=x.dtype) - 1
+
+                s_A = 2 * torch.randint(0, 2, lora_output.shape, device=x.device, dtype=x.dtype) - 1
+
+            lora_noise = F.linear(x.mul(r_A), noisy_weight).mul(s_A)
+
+            return lora_output + lora_noise
+
+        else:
+
+            return F.linear(x, self.weight)
+
         #return self.mu + sigma * eps
 
-    def kl_loss(self):
+    def print_grads(self):
+
+        with torch.no_grad():
+            print("mu grad norm:", self.mu.grad.norm().item(), flush=True)
+            print("sigma grad norm:", self.log_sigma.grad.norm().item(), flush=True)
+
+    def kl_loss_lp(self):
         """
         KL( N(mu, sigma^2) || N(0, prior_std^2) ), summed over all elements.
         """
-        sigma = torch.exp(self.log_sigma)
+
+        # sigma = self.sigma
+        # log_sigma = self.log_sigma
+        #
+        # eps = 1e-6
+
+        sigma = self.sigma
+        log_sigma = torch.log(sigma)
         prior_std_t = torch.tensor(self.prior_std, device=self.mu.device)
 
         kl = (
             (sigma**2 + self.mu**2) / (2.0 * prior_std_t**2)
             - 0.5
-            + (torch.log(prior_std_t) - self.log_sigma)
+            + (torch.log(prior_std_t) - log_sigma)
          #   + self.log_sigma
          #   - torch.log(prior_std_t)
         )
-        #print(f"KL: {kl} kl.sum: {kl.sum()}", flush=True)
-        return kl.sum()
+
+        kl_loss = kl.sum().div(self.mu.numel())
+
+        return kl_loss
+        # print(f"KL: {kl} kl.sum: {kl.sum()}", flush=True)
+
+        # sigma_p = self.prior_std
+        # sigma_p = torch.full_like(log_sigma, sigma_p)
+
+        # kl = (
+        #     torch.log(sigma_p)
+        #     - log_sigma
+        #     + (sigma ** 2 + self.mu ** 2) / (2 * sigma_p ** 2)
+        #     - 0.5
+        # )
+        #
+
+    def kl_loss(self):
+        """
+        KL( N(mu, sigma^2) || N(0, prior_std^2) ), summed over all elements.
+        """
+
+        sigma = self.sigma
+
+        eps = 1e-6
+        sigma_fp64 = sigma.to(torch.float64)
+        mu_fp64 =  self.mu.to(torch.float64)
+        log_sigma_fp64 = torch.log(sigma_fp64 + eps)
+
+        # sigma = torch.exp(self.log_sigma)
+        # prior_std_t = torch.tensor(self.prior_std, device=self.mu.device)
+
+        # kl = (
+        #     (sigma**2 + self.mu**2) / (2.0 * prior_std_t**2)
+        #     - 0.5
+        #     + (torch.log(prior_std_t) - self.log_sigma)
+        #  #   + self.log_sigma
+        #  #   - torch.log(prior_std_t)
+        # )
+        # #print(f"KL: {kl} kl.sum: {kl.sum()}", flush=True)
+
+        sigma_p = self.prior_std
+        sigma_p_fp64 = torch.full_like(log_sigma_fp64, sigma_p)
+
+        kl = (
+            torch.log(sigma_p_fp64)
+            - log_sigma_fp64
+            + (sigma_fp64 ** 2 + mu_fp64 ** 2) / (2 * sigma_p_fp64 ** 2)
+            - 0.5
+        )
+
+        kl_loss = kl.sum().div(self.mu.numel())
+
+        return kl_loss
 
 class BayesianLoRALayer(LoraLayer):
     """
@@ -175,8 +304,14 @@ class BayesianLoRALayer(LoraLayer):
 
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
-        self.lora_A[adapter_name] = BayesianRankParam(self.in_features, r, prior_std=self.prior_std) #nn.Linear(self.in_features, r, bias=False)
-        self.lora_B[adapter_name] = BayesianRankParam(r, self.out_features, prior_std=self.prior_std, init_log_sigma=-50.0) #nn.Linear(r, self.out_features, bias=lora_bias)
+        # self.lora_A[adapter_name] = BayesianRankParam(self.in_features, r, prior_std=self.prior_std) #nn.Linear(self.in_features, r, bias=False)
+        # self.lora_B[adapter_name] = BayesianRankParam(r, self.out_features, prior_std=self.prior_std,
+        #                                               init_log_sigma=-50.0) #nn.Linear(r, self.out_features, bias=lora_bias)
+        # self.lora_bias[adapter_name] = lora_bias
+
+        # self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
+        self.lora_A[adapter_name] = BLoBLinear(self.in_features, r, prior_std=self.prior_std)
+        self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=lora_bias)
         self.lora_bias[adapter_name] = lora_bias
 
         if use_rslora:
@@ -200,7 +335,8 @@ class BayesianLoRALayer(LoraLayer):
         elif init_lora_weights == "eva":
             nn.init.zeros_(self.lora_B[adapter_name].weight)
         elif init_lora_weights:
-            pass
+            self.reset_lora_parameters(adapter_name, init_lora_weights)
+            # pass
             #print("skipping: self.reset_lora_parameters(adapter_name, init_lora_weights)")
         # call this before dora_init
         self._move_adapter_to_device_of_base_layer(adapter_name)
@@ -213,6 +349,32 @@ class BayesianLoRALayer(LoraLayer):
 
         self.set_adapter(self.active_adapters)
 
+    # def reset_lora_parameters(self, adapter_name, init_lora_weights):
+    #     if init_lora_weights is False:
+    #         return
+    #
+    #     if adapter_name in self.lora_A.keys():
+    #         if init_lora_weights is True:
+    #             # initialize A the same way as the default for nn.Linear and B to zero
+    #             # https://github.com/microsoft/LoRA/blob/a0a92e0f26c067cf94747bdbf1ce73793fa44d19/loralib/layers.py#L124
+    #             nn.init.kaiming_uniform_(self.lora_A[adapter_name].mu, a=math.sqrt(5))
+    #             print("kaiming uniform A")
+    #         elif init_lora_weights.lower() == "gaussian":
+    #             nn.init.normal_(self.lora_A[adapter_name].mu, std=1 / self.r[adapter_name])
+    #         else:
+    #             raise ValueError(f"Unknown initialization {init_lora_weights=}")
+    #         nn.init.zeros_(self.lora_B[adapter_name].mu)
+    #         print("zero B mu")
+    #         # if self.lora_bias[adapter_name]:
+    #         #     nn.init.zeros_(self.lora_B[adapter_name].bias)
+    #     if adapter_name in self.lora_embedding_A.keys():
+    #         # Initialize A to zeros and B the same way as the default for nn.Embedding, see:
+    #         # https://github.com/microsoft/LoRA/blob/4c0333854cb905966f8cc4e9a74068c1e507c7b7/loralib/layers.py#L59-L60
+    #         nn.init.zeros_(self.lora_embedding_A[adapter_name])
+    #         nn.init.normal_(self.lora_embedding_B[adapter_name])
+    #         if self.lora_bias[adapter_name]:
+    #             # embeddings are not supported at the moment, but still adding this for consistency
+    #             nn.init.zeros_(self.lora_embedding_B[adapter_name].bias)
 
   #  def baysian_init_params(self):
   #      """
@@ -225,42 +387,110 @@ class BayesianLoRALayer(LoraLayer):
   #          nn.init.constant_(self.log_sigma_A, -5.0)
   #          nn.init.constant_(self.log_sigma_B, -5.0)
 
-    def get_delta_weight(self, adapter: str) -> torch.Tensor:
+    # def get_delta_weight(self, adapter: str) -> torch.Tensor:
+    #     """
+    #     Overriding the LoraLayer method to produce DeltaW in a Bayesian manner.
+    #     Called inside forward or merge/unmerge logic in LoraLayer code.
+    #     """
+    #
+    #     # 1) Figure out device/dtype logic:
+    #     device = self.lora_B[adapter].mu.device
+    #     dtype = self.lora_B[adapter].mu.dtype
+    #     cast_to_fp32 = (device.type == "cpu") and (dtype in [torch.float16, torch.bfloat16])
+    #
+    #     # 2) Sample and merge => these are your final (A, B) in [in_features, r], [r, out_features]
+    #     weight_A = self.lora_A[adapter].sample_and_merge()
+    #     weight_B = self.lora_B[adapter].sample_and_merge()
+    #
+    #     # 3) If needed, cast to float32 for the matmul
+    #     if cast_to_fp32:
+    #         weight_A = weight_A.float()
+    #         weight_B = weight_B.float()
+    #
+    #     # 4) Multiply B@A, transpose if needed, scale
+    #     output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+    #
+    #     # 5) If you cast to fp32 above, cast the output back to the original dtype
+    #     if cast_to_fp32:
+    #         output_tensor = output_tensor.to(dtype=dtype)
+    #
+    #         # cast back the weights
+    #         self.lora_A[adapter].weight.data = weight_A.to(dtype)
+    #         self.lora_B[adapter].weight.data = weight_B.to(dtype)
+    #
+    #
+    #     if cast_to_fp32:
+    #         output_tensor = output_tensor.to(dtype=dtype)
+    #
+    #         # Also cast your BayesianRankParam's mu/log_sigma back to original dtype
+    #         # so they remain consistent with the rest of the model
+    #         self.lora_A[adapter].mu.data = self.lora_A[adapter].mu.data.to(dtype)
+    #         self.lora_A[adapter].log_sigma.data = self.lora_A[adapter].log_sigma.data.to(dtype)
+    #         self.lora_B[adapter].mu.data = self.lora_B[adapter].mu.data.to(dtype)
+    #         self.lora_B[adapter].log_sigma.data = self.lora_B[adapter].log_sigma.data.to(dtype)
+    #
+    #     # 6) Return the resulting delta W
+    #     return output_tensor
+
+    def get_delta_weight(self, adapter) -> torch.Tensor:
         """
-        Overriding the LoraLayer method to produce DeltaW in a Bayesian manner.
-        Called inside forward or merge/unmerge logic in LoraLayer code.
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
         """
-    
-        # 1) Figure out device/dtype logic:
-        device = self.lora_B[adapter].mu.device
-        dtype = self.lora_B[adapter].mu.dtype
-        cast_to_fp32 = (device.type == "cpu") and (dtype in [torch.float16, torch.bfloat16])
-    
-        # 2) Sample and merge => these are your final (A, B) in [in_features, r], [r, out_features]
-        weight_A = self.lora_A[adapter].sample_and_merge()
-        weight_B = self.lora_B[adapter].sample_and_merge()
-    
-        # 3) If needed, cast to float32 for the matmul
+        device = self.lora_B[adapter].weight.device
+        dtype = self.lora_B[adapter].weight.dtype
+
+        # In case users wants to merge the adapter weights that are in
+        # (b)float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
+        cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
+
+        weight_A = self.lora_A[adapter].mu # weight
+        weight_B = self.lora_B[adapter].weight
+
         if cast_to_fp32:
             weight_A = weight_A.float()
             weight_B = weight_B.float()
-    
-        # 4) Multiply B@A, transpose if needed, scale
+
         output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
-    
-        # 5) If you cast to fp32 above, cast the output back to the original dtype
+
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
-    
-            # Also cast your BayesianRankParam's mu/log_sigma back to original dtype
-            # so they remain consistent with the rest of the model
-            self.lora_A[adapter].mu.data = self.lora_A[adapter].mu.data.to(dtype)
-            self.lora_A[adapter].log_sigma.data = self.lora_A[adapter].log_sigma.data.to(dtype)
-            self.lora_B[adapter].mu.data = self.lora_B[adapter].mu.data.to(dtype)
-            self.lora_B[adapter].log_sigma.data = self.lora_B[adapter].log_sigma.data.to(dtype)
-    
-        # 6) Return the resulting delta W
+
+            # cast back the weights
+            self.lora_A[adapter].weight.mu = weight_A.to(dtype)
+            self.lora_B[adapter].weight.data = weight_B.to(dtype)
+
         return output_tensor
+
+    def reset_lora_parameters(self, adapter_name, init_lora_weights):
+
+        if init_lora_weights is False:
+            return
+
+        if adapter_name in self.lora_A.keys():
+            if init_lora_weights is True:
+                # initialize A the same way as the default for nn.Linear and B to zero
+                # https://github.com/microsoft/LoRA/blob/a0a92e0f26c067cf94747bdbf1ce73793fa44d19/loralib/layers.py#L124
+                nn.init.kaiming_uniform_(self.lora_A[adapter_name].mu, a=math.sqrt(5))
+            elif init_lora_weights.lower() == "gaussian":
+                nn.init.normal_(self.lora_A[adapter_name].weight, std=1 / self.r[adapter_name])
+            else:
+                raise ValueError(f"Unknown initialization {init_lora_weights=}")
+            nn.init.zeros_(self.lora_B[adapter_name].weight)
+            if self.lora_bias[adapter_name]:
+                nn.init.zeros_(self.lora_B[adapter_name].bias)
+        if adapter_name in self.lora_embedding_A.keys():
+            # Initialize A to zeros and B the same way as the default for nn.Embedding, see:
+            # https://github.com/microsoft/LoRA/blob/4c0333854cb905966f8cc4e9a74068c1e507c7b7/loralib/layers.py#L59-L60
+            nn.init.zeros_(self.lora_embedding_A[adapter_name])
+            nn.init.normal_(self.lora_embedding_B[adapter_name])
+            if self.lora_bias[adapter_name]:
+                # embeddings are not supported at the moment, but still adding this for consistency
+                nn.init.zeros_(self.lora_embedding_B[adapter_name].bias)
 
 
 
@@ -533,9 +763,11 @@ class BayesianLinear(nn.Module, BayesianLoRALayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 #print(f"LORA A MU: {lora_A.mu}")
-                x = self._cast_input_dtype(x, lora_A.mu.dtype)
+                # x = self._cast_input_dtype(x, lora_A.mu.dtype)
+                x = self._cast_input_dtype(x, lora_B.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
+                    # print("forward bayesian lora ....")
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     if isinstance(dropout, nn.Identity) or not self.training:

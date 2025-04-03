@@ -269,6 +269,23 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         #print(f"{total_kl.shape}, {total_kl}"+"=="*30)
         return total_kl
 
+    def print_grads(self) -> torch.Tensor:
+        """
+        Computes the total KL divergence from all Bayesian modules in self.model.
+        Assumes each Bayesian module implements a .kl_loss() method returning a scalar.
+        Returns:
+            total_kl (torch.Tensor): The summed KL loss.
+        """
+        # If you need it on the same device as the model,
+        # we can create a 0.0 tensor on the correct device:
+        # Traverse all submodules in self.model
+        for name, module in self.model.named_modules():
+            # Check if the module has a .kl_loss() method
+            if hasattr(module, "print_grads") and callable(module.print_grads):
+                # Accumulate
+                module.print_grads()
+        # print(f"{total_kl.shape}, {total_kl}"+"=="*30)
+
 
     def forward(
             self,
@@ -414,10 +431,21 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
                 ce_loss = loss
 
             # kl_loss = self._compute_kl() * self.kl_scale
-            kl_loss = self._compute_kl()
-            kl_loss_data = kl_loss.item()
-            #print(f"ce: {ce_loss} kl: {kl_loss}", flush=True)
-            loss = ce_loss + kl_loss * self.kl_scale
+
+            if self.kl_scale > 0 and self.training:
+                kl_loss = self._compute_kl()
+                kl_loss = kl_loss.to(dtype=ce_loss.dtype)
+                kl_loss_data = kl_loss.item()
+
+                # print(kl_loss.requires_grad, flush=True)
+                # print(kl_loss, flush=True)
+
+                # kl_loss.mul_(self.kl_scale) # .backward()
+                # self.print_grads()
+
+                loss = ce_loss + kl_loss * self.kl_scale
+            else:
+                kl_loss, kl_loss_data = 0, 0
 
             ce_loss_data = ce_loss.item()
             additional_losses["ce_loss"] = ce_loss_data
@@ -449,7 +477,7 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
                 # distilled_loss = distilled_loss.sum(2) * decoder_attention_mask.float()
                 # distilled_loss = distilled_loss.sum().div(n_features).div(bsz)
 
-                loss = (1 - self.teacher_distillation) + ce_loss + self.teacher_distillation * distilled_loss
+                loss = (1 - self.teacher_distillation) + loss + self.teacher_distillation * distilled_loss
             else:
                 distilled_loss = 0
 

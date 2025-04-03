@@ -112,8 +112,6 @@ parser.add_argument('-freeze_embedding', action='store_true',
 parser.add_argument('-disable_safetensors', action='store_true',
                     help="Use exponential moving average during training")
 
-parser.add_argument('-max_steps', type=int, default=30000,
-                    help='Max number of update steps')
 
 parser.add_argument('-keep_special_character', action='store_true',
                         help="Ignore the special character removal")
@@ -214,13 +212,13 @@ if args.low_rank_type == "diagonal_gaussian":
         r=args.lora_rank,
         lora_alpha=64,
         target_modules=lora_target_modules,
-        lora_dropout=0.5,
+        lora_dropout=0.05,
         bias="none",
     	bayesian_posterior="diagonal_gaussian",
     	prior_std=0.01,
         # any other PEFT arguments
     )
-    
+
     # Register the custom Bayesian implementation
     lora_config._register_custom_module(
         {
@@ -389,9 +387,11 @@ else:
 output_dir = args.output_dir + "/model_%s_%s_%s" % (
     args.model_size, args.low_rank_type, args.low_rank_modules)
 
+log_dir = os.path.join(output_dir, "logs")
 # TODO: logging_dir
 training_args = Seq2SeqTrainingArguments(
     output_dir=output_dir,  # change to a repo name of your choice
+    logging_dir=log_dir,
     # logging_dir="/export/data1/data/eugan/ASR/model/DE.EN.AR.UA.ES.ZH.TR.JA/whisper.v3/log",
     per_device_train_batch_size=args.batch_size,
     gradient_accumulation_steps=args.gradient_accumulation,  # increase by 2x for every 2x decrease in batch size
@@ -425,7 +425,8 @@ training_args = Seq2SeqTrainingArguments(
     remove_unused_columns=False,
     label_names=["labels"],
     disable_tqdm=args.no_progress_bar,
-    save_safetensors=not args.disable_safetensors
+    save_safetensors=not args.disable_safetensors,
+    metric_for_best_model="eval_loss",  # Must match the key in the metrics dict
     # push_to_hub=True,
 )
 
@@ -483,15 +484,19 @@ class AggregatedAdditionalLossesCallback(TrainerCallback):
         if state.additional_losses_steps > 0:
             # Compute the average additional losses over the logging interval.
             avg_additional_losses = {
-                key: state.additional_losses_sum[key] / state.additional_losses_steps
+                key: f"{(state.additional_losses_sum[key] / state.additional_losses_steps):.3f}".rstrip('0').rstrip('.')
                 for key in state.additional_losses_sum
             }
-            logs["additional_losses"] = avg_additional_losses
+            logs["details"] = avg_additional_losses
             # Reset the accumulation.
             trainer._additional_losses_sum = {}
             trainer._additional_losses_steps = 0
 
         return control
+
+
+# callbacks = [early_stopping, LoadFullModelCallback(), AggregatedAdditionalLossesCallback()]
+callbacks = [ LoadFullModelCallback(), AggregatedAdditionalLossesCallback()]
 
 
 # trainer = Seq2SeqTrainer(
@@ -506,7 +511,8 @@ trainer = MemSeq2SeqTrainer(
     optimizers=(optimizer, lr_scheduler),
     # compute_metrics=compute_metrics,
     tokenizer=processor.feature_extractor,
-    callbacks=[early_stopping, LoadFullModelCallback(), AggregatedAdditionalLossesCallback()]
+    callbacks=callbacks,
+
 )
 
 # trainer.state.stateful_callbacks['EarlyStoppingCallback'] = early_stopping
