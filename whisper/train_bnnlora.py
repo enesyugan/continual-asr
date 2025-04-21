@@ -13,11 +13,12 @@ from pydub import AudioSegment
 from transformers import WhisperFeatureExtractor, WhisperTokenizer, WhisperProcessor, WhisperForConditionalGeneration, \
     AutoProcessor, AutoTokenizer, SeamlessM4TForSpeechToText, EarlyStoppingCallback, SeamlessM4Tv2ForSpeechToText
 from transformers import Seq2SeqTrainingArguments, SpeechEncoderDecoderConfig, AutoFeatureExtractor, WhisperConfig
-from transformers import Seq2SeqTrainer, TrainerCallback
+from transformers import Seq2SeqTrainer, TrainerCallback, PreTrainedModel
 from peft import LoraConfig, PeftModel, LoraModel, LoraConfig, get_peft_model
 
 from trainers.trainer_shuffle import MemSeq2SeqTrainer
-from bnn_lora import BayesianLinear, BayesianLoraConfig
+from bnn_lora import BLoB, BLoBConfig, BLoBModel
+from peft.tuners.lora import Linear
 import random
 import copy
 import torch
@@ -34,6 +35,7 @@ from prepare_data import get_train_dev
 
 import yaml
 
+world_size = int(os.environ.get("WORLD_SIZE", 1))
 local_rank = int(os.environ.get("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}")
 
@@ -67,6 +69,8 @@ parser.add_argument('-learning_rate', type=float, default=0.001,
                     adadelta = 1, adam = 0.001""")
 parser.add_argument('-kl_scale', type=float, default=1e-4,
                     help="scaling factor of BNN KL loss")
+parser.add_argument('-kl_type', type=str, default="kl_div",
+                    help="Regularization type: kl_div|ws_dist")
 parser.add_argument('-warmup_steps', type=int, default=2000,
                     help='Number of warm up steps for learning rate')
 parser.add_argument('-lr_scheduler', type=str, default="inv_sqrt",
@@ -118,6 +122,19 @@ parser.add_argument('-keep_special_character', action='store_true',
 
 parser.add_argument('-test_mode', action='store_true',
                         help="Test mode sets eval, logging, save steps to 1 and max steps 2")
+
+parser.add_argument('-prior_std', type=float, default=0.01
+                    , help='Prior Std for the lora model')
+
+parser.add_argument('-init_log_sigma', type=float, default=-5.5
+                    , help='init_log_sigma for initializing the standard deviations')
+
+
+parser.add_argument('-early_stopping_patience', type=int, default=0,
+                    help='The patience for early stopping (0=no early stopping)')
+
+parser.add_argument('-bayesian_a_only', action='store_true',
+                        help="Apply Bayesian only on the A Matrix (like the blob paper)")
 
 args = parser.parse_args()
 
@@ -206,30 +223,63 @@ else:
     raise NotImplementedError
 
 
-if args.low_rank_type == "diagonal_gaussian":
-    print("BNN")
-    lora_config = BayesianLoraConfig(
+# if args.low_rank_type == "diagonal_gaussian":
+if args.low_rank_type == "blob":
+    print("BLOB")
+    lora_config = BLoBConfig(
         r=args.lora_rank,
         lora_alpha=64,
         target_modules=lora_target_modules,
         lora_dropout=0.05,
         bias="none",
     	bayesian_posterior="diagonal_gaussian",
-    	prior_std=0.01,
+    	prior_std=args.prior_std,
+        init_log_sigma=args.init_log_sigma,
+        bayesian_a_only=args.bayesian_a_only
         # any other PEFT arguments
     )
+
+    print(lora_config)
 
     # Register the custom Bayesian implementation
     lora_config._register_custom_module(
         {
-            nn.Linear: BayesianLinear  # replace nn.Linear with BayesianLinear
+            nn.Linear: BLoB  # replace nn.Linear with BayesianLinear
         }
     )
+    #
+    # adapter_name = f"blob-prior{args.prior_std}-sigma{args.init_log_sigma}"
+    #
+
+    # monkey patching the function of BlobModel
+    LoraModel._create_and_replace = BLoBModel._create_and_replace
+
+    # note: the add_adapter function changes the model at module level
+    # without converting the model into a BLoBModel/LoraModel
+    # the trainer saves the adapter weights only this way.
     model.add_adapter(lora_config)
-    model.kl_scale = args.kl_scale
+
+    # not sure, but this would normalize the
+    model.kl_scale = args.kl_scale / args.gradient_accumulation
+    model.kl_type = args.kl_type
+
+    # manually converting the model to BLoBModel requires telling the trainer to save the adapter weights only
+    # model = BLoBModel(model, lora_config, adapter_name="default")
+    #
+    # print(isinstance(model, BLoBModel))  # ✅ Should be True
+    # print(isinstance(model, LoraModel))  # ✅ Should be True
+    #
+    # print(isinstance(model, PreTrainedModel))  # ✅ Should be True
+    # print(isinstance(model, PeftModel))  # ✅ Should also be True
+
+    print(model.__class__.mro())
+    # breakpoint()
+
+    model.model.kl_scale = args.kl_scale
 else:
     print("NOT BNN")
-    lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
+    lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64,
+                             target_modules=lora_target_modules, lora_dropout=0.05,
                              bias="none")  # , modules_to_save=["pre_proj_out"])
     model.add_adapter(lora_config)
 
@@ -450,8 +500,9 @@ eval_data_collator = DataCollatorSpeechSeq2SeqWithPadding(feature_extractor=proc
                                                           uid_mapper=dev_uid_mapper, dataset=all_dev_dataset,
                                                           do_augment=False)
 
+
 early_stopping = EarlyStoppingCallback(
-    early_stopping_patience=10)
+    early_stopping_patience=args.early_stopping_patience)
 
 
 class LoadFullModelCallback(TrainerCallback):
@@ -461,6 +512,8 @@ class LoadFullModelCallback(TrainerCallback):
 
             model = PeftModel.from_pretrained(model, state.best_model_checkpoint)
             model.save_pretrained(state.best_model_checkpoint, save_adapter=False)
+
+
 
 
 class AggregatedAdditionalLossesCallback(TrainerCallback):
@@ -496,7 +549,15 @@ class AggregatedAdditionalLossesCallback(TrainerCallback):
 
 
 # callbacks = [early_stopping, LoadFullModelCallback(), AggregatedAdditionalLossesCallback()]
-callbacks = [ LoadFullModelCallback(), AggregatedAdditionalLossesCallback()]
+
+if args.early_stopping_patience <= 0:
+    callbacks = [ LoadFullModelCallback(), AggregatedAdditionalLossesCallback()]
+
+else:
+    if local_rank == 0:
+        print("[INFO] Using early stopping callback with patience = {}".format(args.early_stopping_patience))
+    callbacks = [early_stopping, LoadFullModelCallback(),
+                 AggregatedAdditionalLossesCallback()]
 
 
 # trainer = Seq2SeqTrainer(
@@ -515,7 +576,8 @@ trainer = MemSeq2SeqTrainer(
 
 )
 
-# trainer.state.stateful_callbacks['EarlyStoppingCallback'] = early_stopping
+# if args.early_stopping_patience > 0:
+#     trainer.state.stateful_callbacks['EarlyStoppingCallback'] = early_stopping
 
 trainer.train(resume_from_checkpoint=False)
 
@@ -525,3 +587,23 @@ trainer.train(resume_from_checkpoint=False)
 # else:
 #    print("NOT SAME")
 #    trainer.train(resume_from_checkpoint=False)
+
+
+#
+# class ForceEvalTrainModeCallback(TrainerCallback):
+#     def on_evaluate(self, args, state, control, model=None, **kwargs):
+#         if model is not None:
+#             model.eval()
+#
+#     def on_evaluate_end(self, args, state, control, model=None, **kwargs):
+#         # in case other parts expect the model to go back to train mode automatically
+#         if model is not None:
+#             model.train()
+#
+#     def on_prediction_step(self, args, state, control, model=None, **kwargs):
+#         if model is not None:
+#             model.eval()
+#
+#     def on_prediction_end(self, args, state, control, model=None, **kwargs):
+#         if model is not None:
+#             model.train()

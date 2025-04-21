@@ -247,6 +247,7 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         self.teacher_distillation = 0
         self.label_smoothing = 0
         self.kl_scale = 0.
+        self.kl_type = "kl_div"
 
     def _compute_kl(self) -> torch.Tensor:
         """
@@ -263,9 +264,9 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         # Traverse all submodules in self.model
         for name, module in self.model.named_modules():
             # Check if the module has a .kl_loss() method
-            if hasattr(module, "kl_loss") and callable(module.kl_loss):
+            if hasattr(module, "regularization_loss") and callable(module.kl_loss):
                 # Accumulate
-                total_kl += module.kl_loss()
+                total_kl += module.regularization_loss(type=self.kl_type)
         #print(f"{total_kl.shape}, {total_kl}"+"=="*30)
         return total_kl
 
@@ -306,6 +307,7 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
             output_hidden_states: Optional[bool] = None,
             return_dict: Optional[bool] = None,
             cache_position: Optional[torch.LongTensor] = None,
+            **kwargs
     ) -> Union[Tuple[torch.Tensor], Seq2SeqLMOutput]:
 
         r"""

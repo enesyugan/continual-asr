@@ -40,7 +40,9 @@ from decode_utils import (DataCollatorSpeechSeq2SeqWithPadding,
                           remove_special_characters)
 
 from memory_efficient_whisper import create_whisper_model
-from bnn_lora import BayesianLinear, BayesianLoraConfig
+from bnn_lora import BLoBConfig, BLoB, BLoBModel #BayesianLinear, BayesianLoraConfig
+from peft import LoraConfig, PeftModel, LoraModel, LoraConfig, get_peft_model
+
 
 
 def split_dataset(dataset, num_chunks):
@@ -79,15 +81,19 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
 
         print("[INFO] Loading LORA weights from {}".format(lora_paths[0]))
         if custom_lora:
-            lora_config = BayesianLoraConfig.from_pretrained(lora_paths[0])
-            lora_config._register_custom_module({nn.Linear: BayesianLinear})
+
+            LoraModel._create_and_replace = BLoBModel._create_and_replace
+
+            lora_config = BLoBConfig.from_pretrained(lora_paths[0])
+            print(lora_config)
+            lora_config._register_custom_module({nn.Linear: BLoB})
             main_model = PeftModel.from_pretrained(main_model, model_id=lora_paths[0], config=lora_config)
         else:
             main_model = PeftModel.from_pretrained(main_model, lora_paths[0])
             main_model.merge_and_unload()
         # checkpoint = main_model.state_dict()
 
-        if len(lora_weights) > 0:
+        if len(lora_weights) > 0: 
             lora_weights = [float(x) for x in lora_weights.split("|")]
 
             assert len(lora_weights) >= len(lora_paths)
