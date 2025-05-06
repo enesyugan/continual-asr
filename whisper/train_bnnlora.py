@@ -136,6 +136,9 @@ parser.add_argument('-early_stopping_patience', type=int, default=0,
 parser.add_argument('-bayesian_a_only', action='store_true',
                         help="Apply Bayesian only on the A Matrix (like the blob paper)")
 
+parser.add_argument('-bnn_trick', type=str, default="flipout",
+                    help='Tricks to affect sampling efficiency. Options: [flipout | lrt | bbb]. Default: flipout')
+
 args = parser.parse_args()
 
 if args.test_mode:
@@ -235,7 +238,8 @@ if args.low_rank_type == "blob":
     	bayesian_posterior="diagonal_gaussian",
     	prior_std=args.prior_std,
         init_log_sigma=args.init_log_sigma,
-        bayesian_a_only=args.bayesian_a_only
+        bayesian_a_only=args.bayesian_a_only,
+        trick=args.bnn_trick
         # any other PEFT arguments
     )
 

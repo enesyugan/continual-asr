@@ -1,4 +1,9 @@
 import copy
+from pathlib import Path
+import re
+import json
+
+
 
 import evaluate
 import sacrebleu
@@ -59,10 +64,18 @@ def split_dataset(dataset, num_chunks):
 #     return [DataLoader(chunk, batch_size=batch_size, shuffle=False, num_workers=4) for chunk in dataset_chunks]
 
 
-def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_path,
+def load_model_and_decode(rank, dataset_split, model_path, lora_path, auto_find_checkpoint, tokenizer_path,
                           tgt_lang, custom_lora, device_id, batch_size, beam_size,
                           no_repeat_ngram_size, total_samples,
                           no_progress_bar, lora_weights, result_queue):
+
+    def pprint(*args, **kwargs):
+
+        if rank > 0:
+            return
+
+        print(*args, **kwargs)
+
     """Loads model on specific GPU and decodes its chunk."""
     torch.cuda.set_device(device_id)
 
@@ -79,17 +92,21 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
         lora_paths = lora_path.split("|")
         main_model = model
 
-        print("[INFO] Loading LORA weights from {}".format(lora_paths[0]))
+        weight_path = str(find_weight_path(lora_paths[0], auto_find_checkpoint))
+
+        pprint("[INFO] Loading LORA weights from {}".format(weight_path))
         if custom_lora:
 
             LoraModel._create_and_replace = BLoBModel._create_and_replace
 
-            lora_config = BLoBConfig.from_pretrained(lora_paths[0])
+            lora_config = BLoBConfig.from_pretrained(weight_path)
             print(lora_config)
             lora_config._register_custom_module({nn.Linear: BLoB})
-            main_model = PeftModel.from_pretrained(main_model, model_id=lora_paths[0], config=lora_config)
+            main_model = PeftModel.from_pretrained(main_model, model_id=weight_path, config=lora_config)
+
+            main_model.merge_and_unload()
         else:
-            main_model = PeftModel.from_pretrained(main_model, lora_paths[0])
+            main_model = PeftModel.from_pretrained(main_model, weight_path)
             main_model.merge_and_unload()
         # checkpoint = main_model.state_dict()
 
@@ -115,10 +132,25 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
                                                  low_cpu_mem_usage=True,
                                                  device_map={"": device})
 
-                print("[INFO] Loading LORA weights from {}".format(_lora_path))
+                _weight_path = str(find_weight_path(_lora_path, auto_find_checkpoint))
+                pprint("[INFO] Loading LORA weights from {}".format(_weight_path))
 
-                new_model = PeftModel.from_pretrained(new_model, _lora_path)
-                new_model.merge_and_unload()
+                if custom_lora:
+
+                    LoraModel._create_and_replace = BLoBModel._create_and_replace
+
+                    lora_config = BLoBConfig.from_pretrained(_weight_path)
+                    print(lora_config)
+                    lora_config._register_custom_module({nn.Linear: BLoB})
+                    new_model = PeftModel.from_pretrained(new_model, model_id=_weight_path, config=lora_config)
+
+                    new_model.merge_and_unload()
+                else:
+                    new_model = PeftModel.from_pretrained(new_model, _weight_path)
+                    new_model.merge_and_unload()
+
+                # new_model = PeftModel.from_pretrained(new_model, _weight_path)
+                # new_model.merge_and_unload()
 
                 for (main_param, param) in zip(main_model.parameters(), new_model.parameters()):
 
@@ -154,7 +186,7 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
         forced_decoder_ids.append(model.generation_config.forced_decoder_ids[0])
     else:
         tgt_lang_id = processor.tokenizer.convert_tokens_to_ids(tgt_lang)
-        print(f"Set target lang:{tgt_lang} id: {tgt_lang_id}")
+        pprint(f"Set target lang:{tgt_lang} id: {tgt_lang_id}")
         forced_decoder_ids.append([1, tgt_lang_id])
 
     forced_decoder_ids.append([2, transcribe_id])
@@ -200,9 +232,9 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
     language_tokens = [t for t in processor.tokenizer.additional_special_tokens if len(t) == 6]
     language_ids = [processor.tokenizer.convert_tokens_to_ids(x) for x in language_tokens]
 
-    if rank == 0:
-        print(language_tokens)
-        print(language_ids)
+    # if rank == 0:
+    #     print(language_tokens)
+    #     print(language_ids)
 
     # if not no_progress_bar:
     #     progress_bar = tqdm(total=total_samples, position=rank, desc=f"GPU {device_id}", leave=True)
@@ -245,6 +277,53 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
     result_queue.put(results)
 
 
+def find_weight_path(weight_path, auto_find_checkpoint="none"):
+
+    if auto_find_checkpoint == "none":
+
+        return weight_path
+
+    base_path = Path(weight_path)
+
+    ckpt_dirs = []
+
+    for entry in base_path.iterdir():
+        if entry.is_dir():
+            match = re.match(r"checkpoint-(\d+)", entry.name)
+            if match:
+                step = int(match.group(1))
+                ckpt_dirs.append((step, entry))
+
+    best_ckpt = None
+    best_loss = float("inf")
+
+    checkpoints = sorted(ckpt_dirs)
+
+    for step, path in checkpoints:
+        eval_file = path / "eval_results.json"
+        if eval_file.exists():
+            with open(eval_file) as f:
+                data = json.load(f)
+                loss = data.get("eval_loss")
+                if loss is not None and loss < best_loss:
+                    best_loss = loss
+                    best_ckpt = path
+
+    if best_ckpt is not None and auto_find_checkpoint == "best":
+        return best_ckpt
+    else:
+        earliest_ckpt = checkpoints[0][1] if checkpoints else None
+        latest_ckpt = checkpoints[-1][1] if checkpoints else None
+
+
+        assert earliest_ckpt is not None, "Cannot find any checkpoint!!!"
+        assert latest_ckpt is not None, "Cannot find any checkpoint!!!"
+
+        if auto_find_checkpoint == "latest":
+            return latest_ckpt
+        elif auto_find_checkpoint == "best":
+            return earliest_ckpt
+
 if __name__ == "__main__":
 
     def handle_sigint(sig, frame):
@@ -277,8 +356,7 @@ if __name__ == "__main__":
     parser.add_argument('-target_file', required=False, default="",
                         help="Path to the reference file. If provided word error rate will be computed")
 
-    parser.add_argument('-no_progress_bar', action='store_true',
-                        help="Use spec augmentation")
+
     parser.add_argument('-custom_lora', action='store_true',
                         help="Use spec augmentation")
 
@@ -290,6 +368,12 @@ if __name__ == "__main__":
 
     parser.add_argument('-no_repeat_ngram_size', type=int, default=4,
                         help='Prevent ngram repetition with this size.')
+
+    parser.add_argument('-no_progress_bar', action='store_true',
+                        help="Disable the progress bar")
+
+    parser.add_argument('-auto_find_checkpoint', default="none", type=str,
+                        help="Automatically find checkpoint to easily use with huggingface training/tuning. Options: none|best|latest")
 
     args = parser.parse_args()
 
@@ -310,13 +394,17 @@ if __name__ == "__main__":
     # Spawn processes
     total_size = len(test_dataset)
 
+    # weight_path = str(find_weight_path(args.lora_path, args.auto_find_checkpoint))
+    # print("Using checkpoint:", weight_path)
+    weight_path = args.lora_path
+
     if num_gpus > 1:
 
         processes = []
         for gpu_id in range(num_gpus):
             process = mp.Process(target=load_model_and_decode,
                                  args=(gpu_id, dataset_chunks[gpu_id],
-                                       args.model_path, args.lora_path, args.tokenizer_path,
+                                       args.model_path, weight_path, args.auto_find_checkpoint, args.tokenizer_path,
                                        args.tgt_lang, args.custom_lora, gpu_id,
                                        args.batch_size, args.beam_size, args.no_repeat_ngram_size,
                                        total_size, args.no_progress_bar, args.lora_weights,
@@ -325,7 +413,7 @@ if __name__ == "__main__":
             processes.append(process)
 
     else:
-        load_model_and_decode(0, test_dataset, args.model_path, args.lora_path, args.tokenizer_path,
+        load_model_and_decode(0, test_dataset, args.model_path, weight_path, args.auto_find_checkpoint, args.tokenizer_path,
                               args.tgt_lang, args.custom_lora, 0,
                               args.batch_size, args.beam_size, args.no_repeat_ngram_size, total_size,
                               args.no_progress_bar, args.lora_weights, result_queue)

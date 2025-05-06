@@ -20,6 +20,7 @@ class BLoBConfig(LoraConfig):
         prior_std: float = 0.01,
         init_log_sigma=-5.5,
         bayesian_a_only=False,
+        trick="flipout",
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -27,6 +28,7 @@ class BLoBConfig(LoraConfig):
         self.prior_std = prior_std
         self.init_log_sigma = init_log_sigma
         self.bayesian_a_only = bayesian_a_only
+        self.trick = trick
 
     def __repr__(self):
         base_repr = super().__repr__()
@@ -34,7 +36,8 @@ class BLoBConfig(LoraConfig):
             f"bayesian_posterior={self.bayesian_posterior!r}, "
             f"prior_std={self.prior_std:.4f}, "
             f"init_log_sigma={self.init_log_sigma:.4f}",
-            f"bayesian_a_only={self.bayesian_a_only!r}"
+            f"bayesian_a_only={self.bayesian_a_only!r}",
+            f"trick={self.trick!r}"
         )
         return f"{self.__class__.__name__}({custom_fields}, {base_repr})"
 
@@ -45,6 +48,7 @@ class BLoBConfig(LoraConfig):
             "prior_std": self.prior_std,
             "init_log_sigma": self.init_log_sigma,
             "bayesian_a_only": self.bayesian_a_only,
+            "trick": self.trick
         })
 
         # Convert sets to lists for JSON compatibility
@@ -62,6 +66,7 @@ class BLoBConfig(LoraConfig):
         prior_std = config_dict.pop("prior_std", 0.01)
         init_log_sigma = config_dict.pop("init_log_sigma", -5.5)
         bayesian_a_only = config_dict.pop("bayesian_a_only", False)
+        trick = config_dict.pop("trick", "flipout")
 
         # print("✅ BLoB received:")
         # print("prior_std =", prior_std)
@@ -74,6 +79,7 @@ class BLoBConfig(LoraConfig):
             prior_std=prior_std,
             init_log_sigma=init_log_sigma,
             bayesian_a_only=bayesian_a_only,
+            trick=trick,
             **config_dict
         )
 
@@ -99,7 +105,8 @@ class BLoBLinear(nn.Module):
     """
     def __init__(self, rows, cols,
                  prior_std=0.01,
-                 init_log_sigma=-5.5):
+                 init_log_sigma=-5.5,
+                 trick="flipout"):
         super().__init__()
         self.rows = cols
         self.cols = rows
@@ -114,6 +121,8 @@ class BLoBLinear(nn.Module):
 
         else:
             self.sigma_type = "sqrt"
+
+        self.trick = trick
 
         # mode = deterministic (mu only) or stochastic
 
@@ -184,38 +193,56 @@ class BLoBLinear(nn.Module):
         # return F.linear(x, self.mu)
 
         if self.training:
-            eps = torch.randn_like(self.mu)
+
             sigma = self.sigma
 
-            # w = self.mu + sigma * eps
-            #
-            # return F.linear(x, w)
-            # # sigma = torch.exp(self.log_sigma)
-            # # w = self.mu + sigma * eps
-            #
-            # # what we should do here is:
-            #
             lora_output = F.linear(x, self.mu)
 
-            noisy_weight = eps * sigma
+            if self.trick == "flipout":
+                eps = torch.randn_like(self.mu)
+                noisy_weight = eps * sigma
 
-            # sample the random signs for flipout
-            with torch.no_grad():
-                # print("generating rademacher noises ....")
-                # rademacher noise
-                r_A = 2 * torch.randint(0, 2, x.shape, device=x.device, dtype=x.dtype) - 1
+                # sample the random signs for flipout
+                with torch.no_grad():
+                    # print("generating rademacher noises ....")
+                    # rademacher noise
+                    r_A = 2 * torch.randint(0, 2, x.shape, device=x.device, dtype=x.dtype) - 1
 
-                s_A = 2 * torch.randint(0, 2, lora_output.shape, device=x.device, dtype=x.dtype) - 1
+                    s_A = 2 * torch.randint(0, 2, lora_output.shape, device=x.device, dtype=x.dtype) - 1
 
-            lora_noise = F.linear(x.mul(r_A), noisy_weight).mul(s_A)
+                lora_noise = F.linear(x.mul(r_A), noisy_weight).mul(s_A)
 
-            return lora_output + lora_noise
+                return lora_output + lora_noise
+
+            elif self.trick == "bbb":
+                eps = torch.randn_like(self.mu)
+                noisy_weight = eps * sigma
+                lora_noise = F.linear(x, noisy_weight)
+
+                return lora_output + lora_noise
+
+            elif self.trick == "lrt":  # local reparameterization trick
+
+                # print("Local Reparameterization Trick")
+                # breakpoint()
+
+                mean = lora_output
+                var = F.linear(x ** 2, sigma ** 2)  # shape [B, k]
+
+                std = torch.sqrt(var + 1e-8)
+
+                noise = torch.randn_like(mean)
+
+                return mean + std * noise
+
+            else:
+                raise NotImplementedError(f"The trick '{self.trick}' is not supported.")
+
 
         else:
 
             return F.linear(x, self.weight)
 
-        #return self.mu + sigma * eps
 
     def print_grads(self):
 
@@ -359,12 +386,14 @@ class BLoB(Linear):
         self.prior_std = kwargs.pop("prior_std", 0.01)
         self.init_log_sigma = kwargs.pop("init_log_sigma", -5.5)
         self.bayesian_a_only = kwargs.pop("bayesian_a_only", False)
+        self.trick = kwargs.pop("trick", "flipout")
 
         # print("✅ BLoB received:")
         # print("bayesian_posterior =", self.bayesian_posterior)
         # print("prior_std =", self.prior_std)
         # print("init_log_sigma =", self.init_log_sigma)
         # print("bayesian_a_only =", self.bayesian_a_only)
+        # print("trick ", self.trick)
         # breakpoint()
 
         # print(r, lora_alpha)
@@ -406,7 +435,8 @@ class BLoB(Linear):
 
         # self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
         self.lora_A[adapter_name] = BLoBLinear(self.in_features, r, prior_std=self.prior_std,
-                                               init_log_sigma=self.init_log_sigma)
+                                               init_log_sigma=self.init_log_sigma,
+                                               trick=self.trick)
 
         if self.bayesian_a_only:
             self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=lora_bias)
@@ -414,7 +444,8 @@ class BLoB(Linear):
         else:
             # bias shouldn't matter here, and its often False in lora
             self.lora_B[adapter_name] = BLoBLinear(r, self.out_features, prior_std=self.prior_std,
-                                               init_log_sigma=self.init_log_sigma)
+                                                   init_log_sigma=self.init_log_sigma,
+                                                   trick=self.trick)
             self.lora_bias[adapter_name] = False
 
         if use_rslora:
@@ -889,7 +920,8 @@ class BLoBModel(LoraModel):
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "prior_std": lora_config.prior_std,
             "init_log_sigma": lora_config.init_log_sigma,
-            "bayesian_a_only": lora_config.bayesian_a_only
+            "bayesian_a_only": lora_config.bayesian_a_only,
+            "trick": lora_config.trick
         }
         # for torchao merging, we need the get_apply_tensor_subclass from the quantization config
         try:
@@ -917,9 +949,8 @@ class BLoBModel(LoraModel):
                 init_lora_weights=lora_config.init_lora_weights,
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
-                lora_bias=lora_config.lora_bias,
-                prior_std=lora_config.prior_std,
-                init_log_sigma=lora_config.init_log_sigma
+                lora_bias=lora_config.lora_bias
+
             )
         else:
             device_map = self.model.hf_device_map if hasattr(self.model, "hf_device_map") else None
