@@ -48,6 +48,10 @@ from memory_efficient_whisper import create_whisper_model
 from bnn_lora import BLoBConfig, BLoB, BLoBModel #BayesianLinear, BayesianLoraConfig
 from peft import LoraConfig, PeftModel, LoraModel, LoraConfig, get_peft_model
 
+import warnings
+
+# to exclude warnings from HuggingFace about their own new classes
+warnings.filterwarnings("ignore", message="custom logits")
 
 
 def split_dataset(dataset, num_chunks):
@@ -92,6 +96,7 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, auto_find_
         lora_paths = lora_path.split("|")
         main_model = model
 
+        # print(lora_paths)
         weight_path = str(find_weight_path(lora_paths[0], auto_find_checkpoint))
 
         pprint("[INFO] Loading LORA weights from {}".format(weight_path))
@@ -100,7 +105,7 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, auto_find_
             LoraModel._create_and_replace = BLoBModel._create_and_replace
 
             lora_config = BLoBConfig.from_pretrained(weight_path)
-            print(lora_config)
+            pprint(lora_config)
             lora_config._register_custom_module({nn.Linear: BLoB})
             main_model = PeftModel.from_pretrained(main_model, model_id=weight_path, config=lora_config)
 
@@ -280,7 +285,6 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, auto_find_
 def find_weight_path(weight_path, auto_find_checkpoint="none"):
 
     if auto_find_checkpoint == "none":
-
         return weight_path
 
     base_path = Path(weight_path)
@@ -297,7 +301,10 @@ def find_weight_path(weight_path, auto_find_checkpoint="none"):
     best_ckpt = None
     best_loss = float("inf")
 
+    # print(weight_path)
     checkpoints = sorted(ckpt_dirs)
+
+    # print(checkpoints)
 
     for step, path in checkpoints:
         eval_file = path / "eval_results.json"

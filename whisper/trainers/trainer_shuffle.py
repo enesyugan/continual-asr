@@ -13,6 +13,7 @@ from decimal import Decimal, getcontext
 import torch.distributed as dist
 import shutil
 import warnings
+from functools import partial
 
 import importlib.metadata
 from transformers.utils import (
@@ -40,7 +41,7 @@ from transformers.utils import (
     is_torch_compile_available,
     is_torch_neuroncore_available,
     is_torch_npu_available,
-    is_torch_tpu_available,
+    # is_torch_tpu_available,
     logging,
     strtobool,
 )
@@ -280,7 +281,8 @@ class MemSeq2SeqTrainer(StaticTrainer):
         if not isinstance(train_dataset, torch.utils.data.IterableDataset):
             dataloader_params["sampler"] = self._get_train_sampler()
             dataloader_params["drop_last"] = self.args.dataloader_drop_last
-            dataloader_params["worker_init_fn"] = seed_worker
+            dataloader_params["worker_init_fn"] = partial(
+                    seed_worker, num_workers=self.args.dataloader_num_workers, rank=self.args.process_index)
             dataloader_params["prefetch_factor"] = self.args.dataloader_prefetch_factor
 
         return self.accelerator.prepare(DataLoader(train_dataset, **dataloader_params))

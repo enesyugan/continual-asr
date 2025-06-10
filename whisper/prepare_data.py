@@ -49,10 +49,13 @@ def normalize_text(utterance, language):
 
 
 CHARS_TO_IGNORE_PUNCT = [",", "?", "¿", ".", "!", "¡", ";", "；", ":", '""', "%", '"', "�", "ʿ", "·", "჻", "~", "՞", "؟",
-"،", "।", "॥", "«", "»", "„", "“", "”", "「", "」", "‘", "’", "《", "》", "(", ")", "{", "}", "=", "`", "_", "+", "<",
-">", "…", "–", "°", "´", "ʾ", "‹", "›", "©", "®", "—", "→", "。", "、", "﹂", "﹁", "‧", "～", "﹏", "，", "｛", "｝", "（",
-"）", "［", "］", "【", "】", "‥", "〽", "『", "』", "〝", "〟", "⟨", "⟩", "〜", "：", "！", "？", "♪", "؛", "/", "\\", "º", "−",
-"^", "ʻ", "ˆ","]","[","-", "#"]
+                         "،", "।", "॥", "«", "»", "„", "“", "”", "「", "」", "‘", "’", "《", "》", "(", ")", "{", "}", "=",
+                         "`", "_", "+", "<",
+                         ">", "…", "–", "°", "´", "ʾ", "‹", "›", "©", "®", "—", "→", "。", "、", "﹂", "﹁", "‧", "～", "﹏",
+                         "，", "｛", "｝", "（",
+                         "）", "［", "］", "【", "】", "‥", "〽", "『", "』", "〝", "〟", "⟨", "⟩", "〜", "：", "！", "？", "♪", "؛",
+                         "/", "\\", "º", "−",
+                         "^", "ʻ", "ˆ", "]", "[", "-", "#"]
 
 CHARS_TO_IGNORE = [
     "¿", "¡", ";", "；", ":", '"', "%", "�", "ʿ", "·", "჻", "~", "՞", "؟", "।", "॥", "«", "»", "„", "“", "”",
@@ -96,7 +99,7 @@ mapper_orig = {
     "fi": "<|fi|>",
     "be": "<|be|>",
     "et": "<|et|>",
-	"bn": "<|bn|>",
+    "bn": "<|bn|>",
     "mix": "mix",
     "<unk>": "<unk>",
     "<eos>": "<eos>",
@@ -357,7 +360,6 @@ def do_csw_backup(train_list, pseudo_csw_amount, train=True):
     return csw_dataset
 
 
-
 def get_train_dev(config, special_char_removal=True):
     """
     Iterates over each dataset in 'config', prints dataset name,
@@ -373,11 +375,11 @@ def get_train_dev(config, special_char_removal=True):
 
     # Extract the dictionary of datasets from the config
     datasets_dict = config.get("datasets", {})
-    
+
     if not datasets_dict:
         print("No datasets found in config under 'datasets' key.")
         return
-    
+
     for dataset_name, dataset_config in datasets_dict.items():
         print(f"\nProcessing dataset: '{dataset_name}'")
 
@@ -406,7 +408,8 @@ def get_train_dev(config, special_char_removal=True):
         elif isinstance(raw_dev_path, list):
             dev_path_list = raw_dev_path
         else:
-            print(f"  WARNING: 'dev_path' for '{dataset_name}' is neither string nor list. Found type: {type(raw_dev_path)}")
+            print(
+                f"  WARNING: 'dev_path' for '{dataset_name}' is neither string nor list. Found type: {type(raw_dev_path)}")
             dev_path_list = []
 
         # Check if we ended up with any valid paths
@@ -430,23 +433,24 @@ def get_train_dev(config, special_char_removal=True):
                                           lower, remove_punct,
                                           special_char_removal=special_char_removal).shuffle(seed=seed)
             if len(dev_path_list) == 0 and dev_split_size != 0:
-                if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(train_data)))  # Use x% of the data or 3000 samples max
+                if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(
+                    train_data)))  # Use x% of the data or 3000 samples max
                 tmp = train_data.train_test_split(test_size=dev_split_size)
                 train_data = tmp["train"]
                 dev_data = tmp["test"]
-                dev_list.append(dev_data) 
+                dev_list.append(dev_data)
 
             train_list.append(train_data)
 
-           
         if len(train_list) > 0:
             train_data_dict[dataset_name] = concatenate_datasets(train_list).shuffle(seed=seed)
-       
+
         for dev_path in dev_path_list:
             dev_data = load_asr_dataset(dev_path, language,
                                         lower, remove_punct, special_char_removal=special_char_removal)
             if dev_split_size != 0:
-                if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(train_data)))  # Use x% of the data or 3000 samples max
+                if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(
+                    train_data)))  # Use x% of the data or 3000 samples max
                 dev_data = dev_data.shuffle(seed=seed)
                 tmp = dev_data.train_test_split(test_size=dev_split_size)
                 dev_data = tmp["test"]
@@ -458,10 +462,3 @@ def get_train_dev(config, special_char_removal=True):
 
     dev_data_concat = concatenate_datasets(dev_data_list)
     return train_data_dict, dev_data_concat
-      
-
-        
-
-		
-
-

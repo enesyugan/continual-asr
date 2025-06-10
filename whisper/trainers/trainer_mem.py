@@ -32,7 +32,7 @@ from transformers.utils import (
     is_torch_compile_available,
     is_torch_neuroncore_available,
     is_torch_npu_available,
-    is_torch_tpu_available,
+    # is_torch_hpu_available, 
     logging,
     strtobool,
 )

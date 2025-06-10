@@ -10,10 +10,13 @@ from peft import PeftModel
 from decode import find_weight_path
 from bnn_lora import BLoBConfig, BLoB, BLoBModel
 from peft import LoraConfig, PeftModel, LoraModel, LoraConfig, get_peft_model
+from peft import get_peft_model_state_dict
 
 
 def centralize_and_save(model_path, lora_paths, save_path,
-                        custom_lora, save_as_lora=False, auto_find_checkpoint=True):
+                        custom_lora, save_as_lora=False,
+                        scale_by_variance=False,
+                        auto_find_checkpoint="none"):
     """
     Averages the weights of a list of PyTorch models and returns a new model with the centralized weights.
     Args:
@@ -45,6 +48,8 @@ def centralize_and_save(model_path, lora_paths, save_path,
                                       device_map={"": device})
 
     main_model = base_model
+    main_state_dict = None
+    denominators = dict()
 
     lora_path = lora_paths[0]
 
@@ -68,12 +73,29 @@ def centralize_and_save(model_path, lora_paths, save_path,
         lora_config._register_custom_module({nn.Linear: BLoB})
         main_model = PeftModel.from_pretrained(main_model, model_id=weight_path, config=lora_config)
 
-        main_model.merge_and_unload()
+        main_state_dict = get_peft_model_state_dict(main_model)
+        # main_model.merge_and_unload()
+
+        for key in main_state_dict.keys():
+
+            if key.endswith(".mu"):
+
+                sigma_key = key.replace(".mu", ".log_sigma")
+
+                # store the denominators, initialized as inverse variance
+                # because variance = uncertainty -> inverse variance = importance
+                inv_variance = 1 / torch.exp(2 * main_state_dict[sigma_key])
+                # inv_variance = torch.exp(2 * main_state_dict[sigma_key])
+                denominators[key] = inv_variance
+                if scale_by_variance:
+                    main_state_dict[key] = main_state_dict[key] * inv_variance
     else:
         main_model = PeftModel.from_pretrained(main_model, weight_path)
         main_model.merge_and_unload()
 
     for idx, _lora_path in enumerate(lora_paths[1:]):
+
+        sub_model_state_dict = dict()
 
         sub_model = create_whisper_model(model_path, torch_dtype,
                                          attn_implementation="sdpa",  # "flash_attention_2",
@@ -92,34 +114,60 @@ def centralize_and_save(model_path, lora_paths, save_path,
             lora_config._register_custom_module({nn.Linear: BLoB})
             sub_model = PeftModel.from_pretrained(sub_model, model_id=_weight_path, config=lora_config)
 
-            sub_model.merge_and_unload()
+            # sub_model.merge_and_unload()
+
         else:
             sub_model = PeftModel.from_pretrained(sub_model, _weight_path)
-            sub_model.merge_and_unload()
+            # sub_model.merge_and_unload()
 
-        # print(_lora_path)
-        # lora_weights_path = _lora_path
-        #
-        # # 2. Load the LoRA adapter weights onto the base model
-        # if custom_lora:
-        #     lora_config = BayesianLoraConfig.from_pretrained(lora_weights_path)
-        #     lora_config._register_custom_module({nn.Linear: BayesianLinear})
-        #     sub_model = PeftModel.from_pretrained(main_model, model_id=lora_weights_path, config=lora_config)
-        # else:
-        #     sub_model = PeftModel.from_pretrained(sub_model, lora_weights_path)
-        # sub_model.merge_and_unload()
-
-        # 3. Merge the LoRA weights into the base model's weights and unload the adapter
-        # models_state_dict.append(model.state_dict())
-        # if idx == 0: centralized_model = copy.deepcopy(model)
+        sub_model_state_dict = get_peft_model_state_dict(sub_model)
 
         # TODO: try different ideas of linear interpolation
-        for (main_param, param) in zip(main_model.parameters(), sub_model.parameters()):
-            main_param.data.add_(param.data)
+        # for (main_param, param) in zip(main_model.parameters(), sub_model.parameters()):
+        #     main_param.data.add_(param.data)
+        for key in main_state_dict.keys():
 
+            if key.endswith(".mu"):
+
+                sigma_key = key.replace(".mu", ".log_sigma")
+
+                inv_variance = 1 / torch.exp(2 * sub_model_state_dict[sigma_key])
+                # inv_variance = torch.exp(2 * sub_model_state_dict[sigma_key])
+                denominators[key] += inv_variance
+
+                # TODO: averaging based on
+                if scale_by_variance:
+                    main_state_dict[key] += inv_variance * sub_model_state_dict[key]
+                else:
+                    main_state_dict[key] += sub_model_state_dict[key]
+            elif key.endswith(".log_sigma"):
+
+                pass
+            else:
+
+                # averaging the weights for everything else :)
+                main_state_dict[key] += sub_model_state_dict[key]
+
+    # averaging
     n_models = len(lora_paths)
-    for main_param in main_model.parameters():
-        main_param.data.div_(n_models)
+    for key in main_state_dict.keys():
+
+        if key.endswith(".mu"):
+
+            if scale_by_variance:
+                # print(scale_by_variance)
+                main_state_dict[key].div_(denominators[key])
+            else:
+                main_state_dict[key].div_(n_models)
+
+        elif key.endswith(".log_sigma"):
+
+            pass
+        else:
+            main_state_dict[key].div_(n_models)
+
+    main_model.load_state_dict(main_state_dict, strict=False)
+    main_model.merge_and_unload()
 
     main_model = main_model.base_model.model
     main_model.config.forced_decoder_ids = None
@@ -173,11 +221,16 @@ if __name__ == "__main__":
     parser.add_argument('-save_as_lora', action='store_true',
                         help="Use spec augmentation")
 
+    parser.add_argument('-scale_by_variance', action='store_true',
+                        help="We can use ")
+
     parser.add_argument('-auto_find_checkpoint', default="none", type=str,
                         help="Automatically find checkpoint to easily use with huggingface training/tuning. "
                              "Options: none|best|latest")
 
     args = parser.parse_args()
 
-    centralize_and_save(args.model_path, args.lora_path , args.save_path,
-                        args.custom_lora, args.save_as_lora, args.auto_find_checkpoint)
+    centralize_and_save(args.model_path, args.lora_path, args.save_path,
+                        args.custom_lora, args.save_as_lora,
+                        args.scale_by_variance,
+                        args.auto_find_checkpoint)
