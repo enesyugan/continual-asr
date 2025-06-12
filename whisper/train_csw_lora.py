@@ -1,32 +1,21 @@
 import os
 import sys
-import re
 import warnings
 import argparse
-import math
-from collections import defaultdict
 import yaml
 
-from datasets import load_dataset, ClassLabel, Features, Value, Dataset, Audio, concatenate_datasets, \
-    interleave_datasets
-from pydub import AudioSegment
+from datasets import interleave_datasets
 
-from transformers import WhisperFeatureExtractor, WhisperTokenizer, WhisperProcessor, WhisperForConditionalGeneration, \
-    AutoProcessor, AutoTokenizer, SeamlessM4TForSpeechToText, EarlyStoppingCallback, SeamlessM4Tv2ForSpeechToText
-from transformers import Seq2SeqTrainingArguments, SpeechEncoderDecoderConfig, AutoFeatureExtractor, WhisperConfig
-from transformers import Seq2SeqTrainer, TrainerCallback
-from peft import LoraConfig, PeftModel, LoraModel, LoraConfig, get_peft_model
+from transformers import AutoProcessor, EarlyStoppingCallback
+from transformers import Seq2SeqTrainingArguments
+from transformers import TrainerCallback
+from peft import PeftModel, LoraConfig
 
-from trainers.trainer_shuffle import MemSeq2SeqTrainer
+from commons.trainers import MemSeq2SeqTrainer
 
-import random
-import copy
 import torch
-import numpy as np
-from typing import Any, Dict, List, Union
 from decimal import Decimal, getcontext
 from transformers import get_inverse_sqrt_schedule
-from torch.nn.utils.rnn import pad_sequence
 from torch import nn
 
 from memory_efficient_whisper import create_whisper_model

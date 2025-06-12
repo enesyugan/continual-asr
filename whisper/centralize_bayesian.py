@@ -214,6 +214,8 @@ if __name__ == "__main__":
     #                     nargs="+", help="Paths to the model checkpoints")
     parser.add_argument('-lora_path', required=False, default="", type=str,
                         help="Path to the model checkpoint")
+    parser.add_argument('-lora_path_2', required=False, default="", type=str,
+                        help="Path to the model checkpoint")
     parser.add_argument('-save_path', required=True, default="", type=str,
                         help="Path where the new model will be saved")
     parser.add_argument('-custom_lora', action='store_true',

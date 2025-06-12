@@ -1,10 +1,6 @@
 import os
-import re
 import sys
-from io import BytesIO
-from urllib.request import urlopen
 
-import librosa
 import torch
 import torchaudio
 import yaml
@@ -18,8 +14,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from qwen2.qwen2model import create_qwen2audio_model
 from qwen2.models.qwen2audio_attention import Qwen2AudioFlashAttentionNoPad
 
-from toydata.stm_to_dataset import get_train_dev
-from toydata.collator import DataCollatorForQwen2
+from qwen2.stm_to_dataset import get_train_dev
+from qwen2.collator import DataCollatorForQwen2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
@@ -82,7 +78,7 @@ model = create_qwen2audio_model("Qwen/Qwen2-Audio-7B", config,
 
 # torch.compile(model)
 model = model.to(device)
-from peft import LoraConfig, PeftModel, LoraModel, LoraConfig, get_peft_model
+from peft import LoraConfig
 
 lora_target_modules = ["q_proj", "v_proj"]
 
@@ -187,7 +183,6 @@ model.add_adapter(lora_config)
 #             print("")
 
 
-from peft import LoraConfig, PeftModel, LoraModel, LoraConfig, get_peft_model
 from transformers import get_inverse_sqrt_schedule
 from transformers import Seq2SeqTrainingArguments
 
@@ -202,7 +197,7 @@ optimizer = torch.optim.AdamW(
 
 lr_scheduler = get_inverse_sqrt_schedule(optimizer=optimizer, num_warmup_steps=warmup_steps)
 
-output_dir = "tmp"
+output_dir = "../toydata/tmp"
 batch_size = 1
 gradient_accumulation = 1
 max_steps = 1000
@@ -249,7 +244,7 @@ data_collator = DataCollatorForQwen2(processor,
                                      eos_token="<|endoftext|>")
 
 callbacks = list()
-from transformers import Seq2SeqTrainer, TrainerCallback, PreTrainedModel
+from transformers import Seq2SeqTrainer
 
 trainer = Seq2SeqTrainer(
     args=training_args,

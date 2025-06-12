@@ -13,11 +13,12 @@ from pydub import AudioSegment
 
 from transformers import WhisperFeatureExtractor, WhisperTokenizer, WhisperProcessor, WhisperForConditionalGeneration, \
     AutoProcessor, AutoTokenizer, SeamlessM4TForSpeechToText, EarlyStoppingCallback, SeamlessM4Tv2ForSpeechToText
+from transformers import AutoConfig
 from transformers import Seq2SeqTrainingArguments, SpeechEncoderDecoderConfig, AutoFeatureExtractor, WhisperConfig
 from transformers import Seq2SeqTrainer, TrainerCallback
 from peft import LoraConfig, PeftModel, LoraModel, LoraConfig, get_peft_model
 
-from trainers.trainer_shuffle import MemSeq2SeqTrainer
+from commons.trainers.trainer_shuffle import MemSeq2SeqTrainer
 
 import random
 import copy
@@ -29,9 +30,12 @@ from transformers import get_inverse_sqrt_schedule
 from torch.nn.utils.rnn import pad_sequence
 from torch import nn
 
-from memory_efficient_whisper import create_whisper_model
-from utils import DataCollatorSpeechSeq2SeqWithPadding
-from prepare_data import get_train_dev
+# from memory_efficient_whisper import create_whisper_model
+# from utils import DataCollatorSpeechSeq2SeqWithPadding
+# from prepare_data import get_train_dev
+from qwen2.qwen2model import create_qwen2audio_model
+from collator import DataCollatorForQwen2
+from stm_to_dataset import get_train_dev
 
 local_rank = int(os.environ.get("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}")
@@ -108,11 +112,10 @@ parser.add_argument('-disable_safetensors', action='store_true',
                     help="Use exponential moving average during training")
 
 parser.add_argument('-keep_special_character', action='store_true',
-                        help="Ignore the special character removal")
+                    help="Ignore the special character removal")
 
 args = parser.parse_args()
 print(args)
-
 
 training_uid_mapper = None
 dev_uid_mapper = None
@@ -123,13 +126,10 @@ with open(args.data_config, "r") as f:
 
 # 3. Call get_train_dev with the loaded config
 all_tr_dataset, all_dev_dataset = get_train_dev(data_config,
-                                                special_char_removal= not args.keep_special_character)
+                                                special_char_removal=not args.keep_special_character)
 
 print("Training dataset loaded:", all_tr_dataset)
 print("Development dataset loaded:", all_dev_dataset)
-
-# training_uid_mapper = {key: idx for idx, key in enumerate(concat_tr_dataset["uid"])}
-# dev_uid_mapper = {key: idx for idx, key in enumerate(all_dev_dataset["uid"])}
 
 
 def count_parameters(model: nn.Module):
@@ -153,33 +153,42 @@ torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 # model_name = "openai/whisper-large-v3-turbo"
 # model_
 if args.model_size == "large":
-    model_name = "openai/whisper-large-v3-turbo"
-elif args.model_size == "small":
-    model_name = "openai/whisper-small"
+    model_name = "Qwen/Qwen2-Audio-7B"
 else:
-    model_name = args.model_size
+    raise NotImplementedError
+# elif args.model_size == "small":
+#     model_name = "openai/whisper-small"
+# else:
+#     model_name = args.model_size
 
 checkpoint_path = model_name if args.checkpoint_path == "" else args.checkpoint_path
+attention_type = "flash_attention_2"
+# processor = AutoProcessor.from_pretrained(model_name)
+processor = AutoProcessor.from_pretrained("Qwen/Qwen2-Audio-7B", trust_remote_code=True)
 
-processor = AutoProcessor.from_pretrained(model_name)
 
-model = create_whisper_model(checkpoint_path, torch_dtype,
-                             attn_implementation=args.attn_implementation,
-                             low_cpu_mem_usage=True,
-                             device_map={"": device})
+# model = create_whisper_model(checkpoint_path, torch_dtype,
+#                              attn_implementation=args.attn_implementation,
+#                              low_cpu_mem_usage=True,
+#                              device_map={"": device})
+config = AutoConfig.from_pretrained("Qwen/Qwen2-Audio-7B", trust_remote_code=True)
 
-model.config.forced_decoder_ids = None
-model.config.suppress_tokens = []
-model.label_smoothing = args.label_smoothing
+model = create_qwen2audio_model("Qwen/Qwen2-Audio-7B", config,
+                                torch_dtype=torch_dtype,
+                                trust_remote_code=True,
+                                low_cpu_mem_usage=True,
+                                attn_implementation=attention_type,
+                                mem_efficient=True,
+                                device_map={"": device})
+
 print("pad_token_id: {}".format(model.config.pad_token_id))
-
 print(model)
-
-if args.freeze_embedding:
-    model.proj_out.weight.requires_grad = False
-    if model.proj_out.bias is not None:
-        model.proj_out.bias.requires_grad = False
-    model.model.decoder.embed_tokens.weight.requires_grad = False
+#
+# if args.freeze_embedding:
+#     model.proj_out.weight.requires_grad = False
+#     if model.proj_out.bias is not None:
+#         model.proj_out.bias.requires_grad = False
+#     model.model.decoder.embed_tokens.weight.requires_grad = False
 
 if args.low_rank_modules == "qv":
 
@@ -269,6 +278,7 @@ if len(args.low_rank_type) > 0:
 
 else:
     # nothing happens
+    raise NotImplementedError
     model.proj_out.weight = model.model.decoder.embed_tokens.weight
     # original_save_pretrained = model.save_pretrained
 
@@ -281,29 +291,28 @@ else:
 
     pass
 
-
 count_parameters(model)
 
-if args.teacher_distillation > 0:
-    print("[INFO] Using the Whisper model as a teacher")
-    # actually student and teacher can be the same xD
-    teacher = create_whisper_model(model_name, torch_dtype, attn_implementation="flash_attention_2",
-                                   low_cpu_mem_usage=True,
-                                   device_map={"": device})
-
-    # freeze the parameters for the teacher
-    for param in teacher.parameters():
-        param.requires_grad = False
-
-    teacher.config.forced_decoder_ids = None
-    teacher.config.suppress_tokens = []
-    teacher.config.use_cache = False  # importante
-
-    model.teacher = teacher
-    model.teacher_distillation = args.teacher_distillation
-
-else:
-    teacher = None
+# if args.teacher_distillation > 0:
+#     print("[INFO] Using the Whisper model as a teacher")
+#     # actually student and teacher can be the same xD
+#     teacher = create_whisper_model(model_name, torch_dtype, attn_implementation="flash_attention_2",
+#                                    low_cpu_mem_usage=True,
+#                                    device_map={"": device})
+#
+#     # freeze the parameters for the teacher
+#     for param in teacher.parameters():
+#         param.requires_grad = False
+#
+#     teacher.config.forced_decoder_ids = None
+#     teacher.config.suppress_tokens = []
+#     teacher.config.use_cache = False  # importante
+#
+#     model.teacher = teacher
+#     model.teacher_distillation = args.teacher_distillation
+#
+# else:
+#     teacher = None
 
 # learning_rate = 1e-3
 learning_rate = args.learning_rate
@@ -352,7 +361,6 @@ elif args.optim in ['sgd']:
                 # at the start of training, we want to have high alpha
                 # so it should be
                 # alpha = (1 / self.counter) * self.ema_rate
-
 
                 # alpha = max(0.01, min(alpha, 0.5))
                 # alpha = 1 - self.ema_rate
@@ -412,10 +420,6 @@ elif args.optim in ['sgd']:
         optimizer = torch.optim.SGD(model.parameters,
                                     lr=args.learning_rate)
 
-# lr_scheduler = get_inverse_sqrt_schedule(
-#     optimizer=optimizer,
-#     num_warmup_steps=warmup_steps,
-# )
 
 if args.lr_scheduler in ['inv_sqrt', 'noam']:
     lr_scheduler = get_inverse_sqrt_schedule(optimizer=optimizer, num_warmup_steps=warmup_steps)
@@ -426,13 +430,8 @@ elif args.lr_scheduler == 'cosine':
 else:
     raise NotImplementedError
 
-
-#output_dir = args.output_dir + "/model_%s_%s_%s_%s" % (
-#    args.model_size, "-".join(dataset_names), args.low_rank_type, args.low_rank_modules)
 output_dir = args.output_dir + "/model_%s_%s_%s" % (
     args.model_size, args.low_rank_type, args.low_rank_modules)
-
-
 
 # TODO: logging_dir
 training_args = Seq2SeqTrainingArguments(
@@ -484,27 +483,37 @@ for _ in range(len(all_tr_dataset)):
 train_dataset = interleave_datasets(list(all_tr_dataset.values()), probabilities, seed=42)
 # print("TTTTT: {}".format(train_dataset))
 
-data_collator = DataCollatorSpeechSeq2SeqWithPadding(feature_extractor=processor.feature_extractor,
-                                                     text_processor=processor.tokenizer, model_config=model.config,
-                                                     uid_mapper=training_uid_mapper, dataset=train_dataset,
-                                                     do_augment=args.spec_augment)
 
-eval_data_collator = DataCollatorSpeechSeq2SeqWithPadding(feature_extractor=processor.feature_extractor,
-                                                          text_processor=processor.tokenizer, model_config=model.config,
-                                                          uid_mapper=dev_uid_mapper, dataset=all_dev_dataset,
-                                                          do_augment=False)
+# data_collator = DataCollatorSpeechSeq2SeqWithPadding(feature_extractor=processor.feature_extractor,
+#                                                      text_processor=processor.tokenizer, model_config=model.config,
+#                                                      uid_mapper=training_uid_mapper, dataset=train_dataset,
+#                                                      do_augment=args.spec_augment)
+#
+# eval_data_collator = DataCollatorSpeechSeq2SeqWithPadding(feature_extractor=processor.feature_extractor,
+#                                                           text_processor=processor.tokenizer, model_config=model.config,
+#                                                           uid_mapper=dev_uid_mapper, dataset=all_dev_dataset,
+#                                                           do_augment=False)
+
+data_collator = DataCollatorForQwen2(processor,
+                                     prompt_template="<|audio_bos|><|AUDIO|><|audio_eos|> Transcribe this speech:",
+                                     eos_token="<|endoftext|>", augment=True)
+
+eval_data_collator = DataCollatorForQwen2(processor,
+                                     prompt_template="<|audio_bos|><|AUDIO|><|audio_eos|> Transcribe this speech:",
+                                     eos_token="<|endoftext|>", augment=False)
+
 
 early_stopping = EarlyStoppingCallback(
     early_stopping_patience=10)
 
 
-class LoadFullModelCallback(TrainerCallback):
-    def on_train_end(self, _args, state, control, model=None, **kwargs):
-        if _args.load_best_model_at_end and state.best_model_checkpoint and len(args.low_rank_type) > 0:
-            print(f"Loading best model from {state.best_model_checkpoint}")
-
-            model = PeftModel.from_pretrained(model, state.best_model_checkpoint)
-            model.save_pretrained(state.best_model_checkpoint, save_adapter=False)
+# class LoadFullModelCallback(TrainerCallback):
+#     def on_train_end(self, _args, state, control, model=None, **kwargs):
+#         if _args.load_best_model_at_end and state.best_model_checkpoint and len(args.low_rank_type) > 0:
+#             print(f"Loading best model from {state.best_model_checkpoint}")
+#
+#             model = PeftModel.from_pretrained(model, state.best_model_checkpoint)
+#             model.save_pretrained(state.best_model_checkpoint, save_adapter=False)
 
 
 # trainer = Seq2SeqTrainer(
@@ -519,16 +528,8 @@ trainer = MemSeq2SeqTrainer(
     optimizers=(optimizer, lr_scheduler),
     # compute_metrics=compute_metrics,
     tokenizer=processor.feature_extractor,
-    callbacks=[early_stopping, LoadFullModelCallback()]
+    callbacks=[early_stopping]
 )
-
-# trainer.state.stateful_callbacks['EarlyStoppingCallback'] = early_stopping
 
 trainer.train(resume_from_checkpoint=False)
 
-# if _model == model_name:
-#    print("SAME")
-#    trainer.train(resume_from_checkpoint=False)
-# else:
-#    print("NOT SAME")
-#    trainer.train(resume_from_checkpoint=False)

@@ -1,4 +1,7 @@
 import torchaudio
+from audiomentations import Compose, AddGaussianNoise, TimeStretch, TimeMask
+import torchaudio.transforms as T
+import torch
 
 QWEN2_LANG_TO_TOKEN = {
 
@@ -16,7 +19,19 @@ QWEN2_LANG_TO_TOKEN = {
 LANG_TOKENS = set(QWEN2_LANG_TO_TOKEN.values())
 
 
+def load_audio(wav_path, augment=False, time_stretch=None,
+               spec_time_masking=None,
+               freq_time_masking=None):
+
+    audio = torchaudio.load(wav_path)
+
+
+
+
 class DataCollatorForQwen2:
+
+    spec_time_masking = T.TimeMasking(time_mask_param=30)
+    spec_freq_masking = T.FrequencyMasking(freq_mask_param=30)
     def __init__(self, processor,
                  prompt_template="<|audio_bos|><|AUDIO|><|audio_eos|> Transcribe this speech:",
                  eos_token="<|endoftext|>",
@@ -90,6 +105,13 @@ class DataCollatorForQwen2:
 
         # labels.masked_fill_(attention_mask.ne(1), -100)
         inputs["labels"] = labels
+
+        if self.do_augment:
+            input_features = inputs["input_features"]
+            input_features = self.spec_time_masking(input_features)
+            input_features = self.spec_freq_masking(input_features)
+            inputs["input_features"] = input_features
+        # print(inputs.keys())
 
         return inputs
 
