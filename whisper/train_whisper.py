@@ -4,15 +4,14 @@ import warnings
 import argparse
 import torch
 from datasets import load_from_disk, Audio
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
+from transformers import WhisperProcessor
 
 from transformers import Seq2SeqTrainingArguments
-from transformers import DataCollatorForSeq2Seq
 from transformers import DataCollatorWithPadding
 from transformers import Seq2SeqTrainer
 # from transformers import AdamW
 from torch.optim.lr_scheduler import LambdaLR
-from transformers import TrainerCallback, TrainerState, TrainerControl
+from transformers import TrainerCallback
 
 # Get the local rank from the environment variables
 local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -31,12 +30,9 @@ warnings.filterwarnings("ignore",
                         message="Passing a tuple of `past_key_values` is deprecated and will be removed in Transformers v4.43.0. You should pass an instance of `EncoderDecoderCache` instead, e.g. `past_key_values=EncoderDecoderCache.from_legacy_cache(past_key_values)`.")
 
 # memory efficient Whisper
-from memory_efficient_whisper import (MemoryEfficientWhisper,
-                                      MemoryEfficientWhisperEncoderLayer,
-                                      MemoryEfficientLayerNorm,
-                                      create_whisper_model)
+from memory_efficient_whisper import (create_whisper_model)
 
-from batch_ensemble_whisper import create_batch_ensemble_whisper
+from batch_ensembles.batch_ensemble_whisper import create_batch_ensemble_whisper
 
 
 # Step 1: Parsing arguments

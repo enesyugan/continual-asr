@@ -16,7 +16,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, Dict
 
 import torch
 import torch.utils.checkpoint
@@ -33,6 +33,7 @@ from transformers.utils import logging
 from transformers.utils.deprecation import deprecate_kwarg
 from transformers.models.auto import AutoModel, AutoModelForCausalLM
 from transformers.models.qwen2_audio.configuration_qwen2_audio import Qwen2AudioConfig, Qwen2AudioEncoderConfig
+from transformers.models.qwen2 import Qwen2ForCausalLM
 
 from transformers.models.qwen2_audio.modeling_qwen2_audio import (Qwen2AudioPreTrainedModel,
                                                                   Qwen2AudioCausalLMOutputWithPast,
@@ -43,7 +44,9 @@ from optimized.layer_norm import MemoryEfficientLayerNorm
 from qwen2.models.qwen2audio_attention import Qwen2AudioPackedFlashAttention
 from qwen2.models.qwen_audio_encoder import MemoryOptimizedQwen2AudioEncoderLayer, MemoryOptimizedQwen2AudioEncoder
 
-
+from transformers.processing_utils import Unpack
+from transformers.models.llama.modeling_llama import KwargsForCausalLM
+from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 
 
 #
@@ -52,6 +55,90 @@ from qwen2.models.qwen_audio_encoder import MemoryOptimizedQwen2AudioEncoderLaye
 
 
 logger = logging.get_logger(__name__)
+
+
+class MemoryEfficientQwen2ForCausalLM(Qwen2ForCausalLM):
+
+    def forward(self,
+                input_ids: Optional[torch.LongTensor] = None,
+                attention_mask: Optional[torch.Tensor] = None,
+                position_ids: Optional[torch.LongTensor] = None,
+                past_key_values: Optional[Cache] = None,
+                inputs_embeds: Optional[torch.FloatTensor] = None,
+                labels: Optional[torch.LongTensor] = None,
+                use_cache: Optional[bool] = None,
+                output_attentions: Optional[bool] = None,
+                output_hidden_states: Optional[bool] = None,
+                cache_position: Optional[torch.LongTensor] = None,
+                logits_to_keep: Union[int, torch.Tensor] = 0,
+                compute_logits = False,
+                **kwargs: Unpack[KwargsForCausalLM],
+                ) -> CausalLMOutputWithPast:
+        r"""
+        labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
+            Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
+            config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
+            (masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
+
+        Example:
+
+        ```python
+        >>> from transformers import AutoTokenizer, LlamaForCausalLM
+
+        >>> model = LlamaForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf")
+        >>> tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
+
+        >>> prompt = "Hey, are you conscious? Can you talk to me?"
+        >>> inputs = tokenizer(prompt, return_tensors="pt")
+
+        >>> # Generate
+        >>> generate_ids = model.generate(inputs.input_ids, max_length=30)
+        >>> tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+        "Hey, are you conscious? Can you talk to me?\nI'm not conscious, but I can talk to you."
+        ```"""
+
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+
+        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
+        outputs: BaseModelOutputWithPast = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            cache_position=cache_position,
+            **kwargs,
+        )
+
+        hidden_states = outputs.last_hidden_state
+        # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
+        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+
+        if compute_logits:
+            logits = self.lm_head(hidden_states[:, slice_indices, :])
+        else:
+            logits = hidden_states
+
+        loss = None
+        if labels is not None:
+            raise NotImplementedError("labels must not be given to the MemoryEfficientQwen2ForCausalLM")
+            # loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
+
+        return CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+
+
 
 
 class Qwen2AudioMultiModalProjector(nn.Module):
@@ -67,21 +154,50 @@ class Qwen2AudioMultiModalProjector(nn.Module):
 # class Qwen2AudioForConditionalGeneration(Qwen2AudioPreTrainedModel, GenerationMixin):
 #     def __init__(self, config: Qwen2AudioConfig):
 #         super().__init__(config)
-#         self.audio_tower = AutoModel.from_config(config.audio_config)  # Usually a `Qwen2AudioEncoder` instance
-#
-#         self.multi_modal_projector = Qwen2AudioMultiModalProjector(config)
-#         self.vocab_size = config.text_config.vocab_size
-#         self.language_model = AutoModelForCausalLM.from_config(config.text_config)
-#         if self.language_model._tied_weights_keys is not None:
-#             self._tied_weights_keys = [f"language_model.{k}" for k in self.language_model._tied_weights_keys]
-#
-#         self.pad_token_id = self.config.pad_token_id if self.config.pad_token_id is not None else -1
-#         self._padding_side = "left"  # set it to left by default, user can use setter to change padding_sides
-#         self.post_init()
+        self.audio_tower = AutoModel.from_config(config.audio_config)  # Usually a `Qwen2AudioEncoder` instance
+
+        self.multi_modal_projector = Qwen2AudioMultiModalProjector(config)
+        self.vocab_size = config.text_config.vocab_size
+        self.language_model = AutoModelForCausalLM.from_config(config.text_config)
+        if self.language_model._tied_weights_keys is not None:
+            self._tied_weights_keys = [f"language_model.{k}" for k in self.language_model._tied_weights_keys]
+
+        self.pad_token_id = self.config.pad_token_id if self.config.pad_token_id is not None else -1
+        self._padding_side = "left"  # set it to left by default, user can use setter to change padding_sides
+        self.post_init()
 
 class MemoryEfficientQwen2AudioLM(Qwen2AudioForConditionalGeneration):
-    # def __init__(self, config: Qwen2AudioConfig):
-    #     super().__init__(config)
+    def __init__(self, config: Qwen2AudioConfig):
+        # super().__init__(config)
+
+        # call init from the grandparent class
+        Qwen2AudioPreTrainedModel.__init__(self, config)
+
+        # changes AutoModel/Qwen2AudioEncoder to MemoryOptimizedQwen2AudioEncoder
+        self.audio_tower = MemoryOptimizedQwen2AudioEncoder(config.audio_config)  # Usually a `Qwen2AudioEncoder` instance
+        # self.audio_tower = AutoModel.from_config(config.audio_config)  # Usually a `Qwen2AudioEncoder` instance
+
+        self.multi_modal_projector = Qwen2AudioMultiModalProjector(config)
+        self.vocab_size = config.text_config.vocab_size
+
+        # changes AutoModel to MemoryEfficientQwen2ForCausalLM
+        self.language_model = MemoryEfficientQwen2ForCausalLM(config.text_config)
+
+        if self.language_model._tied_weights_keys is not None:
+            self._tied_weights_keys = [f"language_model.{k}" for k in self.language_model._tied_weights_keys]
+
+        self.pad_token_id = self.config.pad_token_id if self.config.pad_token_id is not None else -1
+        self._padding_side = "left"  # set it to left by default, user can use setter to change padding_sides
+        self.post_init()
+
+        # new options for continual learning / batch_ensembles learning
+        self.teacher = None
+        self.teacher_distillation = 0
+        self.label_smoothing = 0
+        self.kl_scale = 0.
+        self.kl_type = "kl_div"
+
+        print(type(self.language_model))
 
     # @property
     # def padding_side(self):
@@ -466,10 +582,14 @@ class MemoryEfficientQwen2AudioLM(Qwen2AudioForConditionalGeneration):
             return_dict=return_dict,
         )
 
+        # TODO : get the output hidden states from language model only, not the states
         logits = outputs[0]
 
         loss = None
+        ce_loss = 0
+        additional_losses = {}
 
+        # TODO : get the 
         if labels is not None:
 
             # Shift so that tokens < n predict n
@@ -482,23 +602,73 @@ class MemoryEfficientQwen2AudioLM(Qwen2AudioForConditionalGeneration):
                 shift_labels = labels[..., 1:].contiguous()
             # Flatten the tokens
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(
+
+            # do language model here
+            shift_logits = self.language_model.lm_head(shift_logits)
+
+            ce_loss = loss_fct(
                 shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1).to(shift_logits.device)
             )
+
+        if self.kl_scale > 0 and self.training:
+            kl_loss = self._compute_kl()
+            kl_loss = kl_loss.to(dtype=ce_loss.dtype)
+            kl_loss_data = kl_loss.item()
+
+            loss = ce_loss + kl_loss * self.kl_scale
+        else:
+            kl_loss, kl_loss_data = 0, 0
+            loss = ce_loss
+
+        ce_loss_data = ce_loss.item()
+        additional_losses["ce_loss"] = ce_loss_data
+        if self.kl_scale > 0.0:
+            additional_losses["kl_loss"] = kl_loss_data
 
         if not return_dict:
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
 
-        return Qwen2AudioCausalLMOutputWithPast(
+        return BayesianQwen2AudioCausalLMOutputWithPast(
             loss=loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
             attention_mask=attention_mask,
+            additional_losses=additional_losses
         )
 
+    def _compute_kl(self) -> torch.Tensor:
+        """
+        Computes the total KL divergence from all Bayesian modules in self.model.
+        Assumes each Bayesian module implements a .kl_loss() method returning a scalar.
+        Returns:
+            total_kl (torch.Tensor): The summed KL loss.
+        """
+        # If you need it on the same device as the model,
+        # we can create a 0.0 tensor on the correct device:
+        device = next(self.language_model.parameters()).device
+        total_kl = torch.tensor(0.0, device=device)
+
+        # Traverse all submodules in self.model
+        for name, module in self.audio_tower.named_modules():
+            # Check if the module has a .kl_loss() method
+            if hasattr(module, "regularization_loss") and callable(module.kl_loss):
+                # Accumulate
+                total_kl += module.regularization_loss(type=self.kl_type)
+
+        for name, module in self.language_model.named_modules():
+            # Check if the module has a .kl_loss() method
+            if hasattr(module, "regularization_loss") and callable(module.kl_loss):
+                # Accumulate
+                total_kl += module.regularization_loss(type=self.kl_type)
+        # print(f"{total_kl.shape}, {total_kl}"+"=="*30)
+        return total_kl
+
+@dataclass
+class BayesianQwen2AudioCausalLMOutputWithPast(Qwen2AudioCausalLMOutputWithPast):
+    additional_losses: Optional[Dict[str, torch.FloatTensor]] = None
 
 def create_qwen2audio_model(model_name,
                             config,

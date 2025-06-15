@@ -41,7 +41,7 @@ class BLoBLinear(nn.Module):
         self.rows = cols
         self.cols = rows
 
-        # This represents the bayesian-ed A matrix in Lora. B is kept deterministic.
+        # This represents the batch_ensembles-ed A matrix in Lora. B is kept deterministic.
 
         self.prior_std = prior_std  # 0.2 as in the paper
         self.init_log_sigma = init_log_sigma
@@ -750,7 +750,7 @@ class BayesianLinear(nn.Module, BayesianLoRALayer):
                 x = self._cast_input_dtype(x, lora_B.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
-                    # print("forward bayesian lora ....")
+                    # print("forward batch_ensembles lora ....")
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     if isinstance(dropout, nn.Identity) or not self.training:

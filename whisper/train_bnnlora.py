@@ -10,7 +10,7 @@ from transformers import Seq2SeqTrainingArguments
 from transformers import TrainerCallback
 from peft import PeftModel, LoraModel, LoraConfig
 
-from commons.trainers import MemSeq2SeqTrainer
+from commons.trainers.trainer_shuffle import MemSeq2SeqTrainer
 from bnn_lora import BLoB, BLoBConfig, BLoBModel
 import torch
 from decimal import Decimal, getcontext
