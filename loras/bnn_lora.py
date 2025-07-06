@@ -13,15 +13,16 @@ import math
 import operator
 import json
 
+
 class BLoBConfig(LoraConfig):
     def __init__(
-        self,
-        bayesian_posterior: str = None,  # e.g. "diagonal_gaussian"
-        prior_std: float = 0.01,
-        init_log_sigma=-5.5,
-        bayesian_a_only=False,
-        trick="flipout",
-        **kwargs
+            self,
+            bayesian_posterior: str = None,  # e.g. "diagonal_gaussian"
+            prior_std: float = 0.01,
+            init_log_sigma=-5.5,
+            bayesian_a_only=False,
+            trick="flipout",
+            **kwargs
     ):
         super().__init__(**kwargs)
         self.bayesian_posterior = bayesian_posterior
@@ -95,6 +96,8 @@ class BLoBConfig(LoraConfig):
         with open(f"{load_directory}/adapter_config.json", "r") as f:
             config_dict = json.load(f)
         return cls.from_dict(config_dict)
+
+
 # class BayesianRankParam(nn.Module):
 # class BayesianFC(nn.Module):
 class BLoBLinear(nn.Module):
@@ -103,6 +106,7 @@ class BLoBLinear(nn.Module):
     Represents a diagonal Gaussian for a 2D parameter shape (rows, cols).
     We store mu, log_sigma, and sample them each forward call.
     """
+
     def __init__(self, rows, cols,
                  prior_std=0.01,
                  init_log_sigma=-5.5,
@@ -113,7 +117,7 @@ class BLoBLinear(nn.Module):
 
         # This represents the batch_ensembles-ed A matrix in Lora. B is kept deterministic.
 
-        self.prior_std = prior_std   # 0.2 as in the paper
+        self.prior_std = prior_std  # 0.2 as in the paper
         self.init_log_sigma = init_log_sigma
 
         if self.init_log_sigma < 0:
@@ -141,10 +145,9 @@ class BLoBLinear(nn.Module):
 
         if self.sigma_type == "log":
             # self.log_sigma.data.fill_(self.init_log_sigma)
-            nn.init.uniform_(self.log_sigma, self.init_log_sigma, self.init_log_sigma+1)
+            nn.init.uniform_(self.log_sigma, self.init_log_sigma, self.init_log_sigma + 1)
         else:
             nn.init.uniform_(self.log_sigma, self.init_log_sigma / math.sqrt(2), self.init_log_sigma)
-
 
     @property
     def weight(self) -> torch.Tensor:
@@ -172,15 +175,14 @@ class BLoBLinear(nn.Module):
         Draw multiple samples from the posterior, average them, and return
         a single "merged" weight matrix. This can be used to produce a final
         single update if you don't want per-inference sampling.
-    
+
         Args:
             number_of_samples (int): How many samples to draw and average.
-    
+
         Returns:
             torch.Tensor of shape [rows, cols]: The averaged weight matrix.
         """
         raise NotImplementedError
-        
 
     def forward(self, x):
         """
@@ -243,13 +245,11 @@ class BLoBLinear(nn.Module):
 
             return F.linear(x, self.weight)
 
-
     def print_grads(self):
 
         with torch.no_grad():
             print("mu grad norm:", self.mu.grad.norm().item(), flush=True)
             print("sigma grad norm:", self.log_sigma.grad.norm().item(), flush=True)
-
 
     def regularization_loss(self, type="kl_loss"):
 
@@ -260,7 +260,6 @@ class BLoBLinear(nn.Module):
         elif type in ["ws_dist", "wasserstein"]:
 
             return self.wasserstein_loss()
-
 
     def wasserstein_loss(self):
 
@@ -291,11 +290,11 @@ class BLoBLinear(nn.Module):
         prior_std_t = torch.tensor(self.prior_std, device=self.mu.device)
 
         kl = (
-            (sigma**2 + self.mu**2) / (2.0 * prior_std_t**2)
-            - 0.5
-            + (torch.log(prior_std_t) - log_sigma)
-         #   + self.log_sigma
-         #   - torch.log(prior_std_t)
+                (sigma ** 2 + self.mu ** 2) / (2.0 * prior_std_t ** 2)
+                - 0.5
+                + (torch.log(prior_std_t) - log_sigma)
+            #   + self.log_sigma
+            #   - torch.log(prior_std_t)
         )
 
         kl_loss = kl.sum().div(self.mu.numel())
@@ -323,7 +322,7 @@ class BLoBLinear(nn.Module):
 
         eps = 1e-6
         sigma_fp64 = sigma.to(torch.float64)
-        mu_fp64 =  self.mu.to(torch.float64)
+        mu_fp64 = self.mu.to(torch.float64)
         log_sigma_fp64 = torch.log(sigma_fp64 + eps)
 
         # sigma = torch.exp(self.log_sigma)
@@ -342,41 +341,40 @@ class BLoBLinear(nn.Module):
         sigma_p_fp64 = torch.full_like(log_sigma_fp64, sigma_p)
 
         kl = (
-            torch.log(sigma_p_fp64)
-            - log_sigma_fp64
-            + (sigma_fp64 ** 2 + mu_fp64 ** 2) / (2 * sigma_p_fp64 ** 2)
-            - 0.5
+                torch.log(sigma_p_fp64)
+                - log_sigma_fp64
+                + (sigma_fp64 ** 2 + mu_fp64 ** 2) / (2 * sigma_p_fp64 ** 2)
+                - 0.5
         )
 
         kl_loss = kl.sum().div(self.mu.numel())
 
         return kl_loss
 
+
 # class BayesianLoRALayer(LoraLayer):
 
 class BLoB(Linear):
     """
     Extends LoraLayer to optionally use a Bayesian posterior (e.g. diagonal Gaussian)
-    for the A,B factors. 
+    for the A,B factors.
     """
 
-
-
     def __init__(
-        self,
-        base_layer,
-        adapter_name: str,
-        r: int = 0,
-        lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,
-        # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        is_target_conv_1d_layer: bool = False,
-        init_lora_weights: Union[bool, str] = True,
-        use_rslora: bool = False,
-        use_dora: bool = False,
-        lora_bias: bool = False,
-        **kwargs
+            self,
+            base_layer,
+            adapter_name: str,
+            r: int = 0,
+            lora_alpha: int = 1,
+            lora_dropout: float = 0.0,
+            fan_in_fan_out: bool = False,
+            # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+            is_target_conv_1d_layer: bool = False,
+            init_lora_weights: Union[bool, str] = True,
+            use_rslora: bool = False,
+            use_dora: bool = False,
+            lora_bias: bool = False,
+            **kwargs
     ):
         # print(kwargs)
         # self.bayesian_posterior = bayesian_posterior
@@ -397,31 +395,28 @@ class BLoB(Linear):
         # breakpoint()
 
         # print(r, lora_alpha)
-        #print("BayesianLoRALayer"+"=="*30)
+        # print("BayesianLoRALayer"+"=="*30)
         super().__init__(base_layer, adapter_name,
                          r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, fan_in_fan_out=fan_in_fan_out,
                          is_target_conv_1d_layer=is_target_conv_1d_layer, init_lora_weights=init_lora_weights,
                          use_rslora=use_rslora, use_dora=use_dora, lora_bias=lora_bias,
                          **kwargs)
 
-
-
-
     def update_layer(
-        self,
-        adapter_name,
-        r,
-        lora_alpha,
-        lora_dropout,
-        init_lora_weights,
-        use_rslora,
-        use_dora: bool = False,
-        lora_bias: bool = False,
+            self,
+            adapter_name,
+            r,
+            lora_alpha,
+            lora_dropout,
+            init_lora_weights,
+            use_rslora,
+            use_dora: bool = False,
+            lora_bias: bool = False,
     ):
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
-        #print(adapter_name+"=="*20)
+        # print(adapter_name+"=="*20)
 
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
@@ -471,7 +466,7 @@ class BLoB(Linear):
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
             # pass
-            #print("skipping: self.reset_lora_parameters(adapter_name, init_lora_weights)")
+            # print("skipping: self.reset_lora_parameters(adapter_name, init_lora_weights)")
         # call this before dora_init
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
@@ -499,7 +494,7 @@ class BLoB(Linear):
         # (b)float16 because some CPUs have slow bf16/fp16 matmuls.
         cast_to_fp32 = device.type == "cpu" and (dtype == torch.float16 or dtype == torch.bfloat16)
 
-        weight_A = self.lora_A[adapter].mu # weight
+        weight_A = self.lora_A[adapter].mu  # weight
         weight_B = self.lora_B[adapter].weight
 
         if cast_to_fp32:
@@ -550,7 +545,6 @@ class BLoB(Linear):
                 # embeddings are not supported at the moment, but still adding this for consistency
                 nn.init.zeros_(self.lora_embedding_B[adapter_name].bias)
 
-
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
@@ -564,7 +558,7 @@ class BLoB(Linear):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        
+
         return super().merge(safe_merge=safe_merge, adapter_names=adapter_names)
 
         # TODO: custom merge if we don't want to use just mu
@@ -573,7 +567,7 @@ class BLoB(Linear):
         # if not adapter_names:
         #     # no adapter to merge
         #     return
-        # 
+        #
         # for active_adapter in adapter_names:
         #     if active_adapter in self.lora_A.keys():
         #         base_layer = self.get_base_layer()
@@ -599,14 +593,14 @@ class BLoB(Linear):
         #                 dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
         #                 dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
         #                 orig_weights = dora_factor * (orig_weights + delta_weight)
-        # 
+        #
         #             if not torch.isfinite(orig_weights).all():
         #                 raise ValueError(
         #                     f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
         #                 )
-        # 
+        #
         #             base_layer.weight.data = orig_weights
-        # 
+        #
         #             if self.lora_bias[active_adapter]:
         #                 new_bias = base_layer.bias + self.lora_B[active_adapter].bias
         #                 if not torch.isfinite(new_bias).all():
@@ -614,7 +608,7 @@ class BLoB(Linear):
         #                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
         #                     )
         #                 base_layer.bias.data = new_bias
-        # 
+        #
         #         else:
         #             delta_weight = self.get_delta_weight(active_adapter)
         #             if not self.use_dora[active_adapter]:
@@ -637,38 +631,38 @@ class BLoB(Linear):
         #                 dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
         #                 new_weight = dora_factor * (base_layer.weight.data + delta_weight)
         #                 base_layer.weight.data = new_weight
-        # 
+        #
         #             if self.lora_bias[active_adapter]:
         #                 base_layer.bias.data += self.lora_B[active_adapter].bias
-        # 
+        #
         #         self.merged_adapters.append(active_adapter)
 
-       # delta_weight = None
-       # if self.bayesian_posterior == "diagonal_gaussian":
-       #     # Option A: Use the means for merging
-       #     A = self.mu_A
-       #     B = self.mu_B
-       #     delta_weight = (A @ B) * self.scaling
+    # delta_weight = None
+    # if self.bayesian_posterior == "diagonal_gaussian":
+    #     # Option A: Use the means for merging
+    #     A = self.mu_A
+    #     B = self.mu_B
+    #     delta_weight = (A @ B) * self.scaling
 
-       #     # Option B: or sample multiple times, average them
-       #     # n_samples = 5
-       #     # sum_w = 0.0
-       #     # for _ in range(n_samples):
-       #     #    sum_w += self.get_delta_weight()
-       #     # delta_weight = sum_w / n_samples
+    #     # Option B: or sample multiple times, average them
+    #     # n_samples = 5
+    #     # sum_w = 0.0
+    #     # for _ in range(n_samples):
+    #     #    sum_w += self.get_delta_weight()
+    #     # delta_weight = sum_w / n_samples
 
-       # else:
-       #     # Standard LoRA approach
-       #     delta_weight = (self.lora_A @ self.lora_B) * self.scaling
+    # else:
+    #     # Standard LoRA approach
+    #     delta_weight = (self.lora_A @ self.lora_B) * self.scaling
 
-       # # Now we add it to the base weight
-       # self.weight.data += delta_weight.data
-       # self.merged = True
+    # # Now we add it to the base weight
+    # self.weight.data += delta_weight.data
+    # self.merged = True
 
     def unmerge(self):
         """
-        Unmerge the LoRA from the base weight. 
-        If merged, subtract the same delta_weight from the base weight. 
+        Unmerge the LoRA from the base weight.
+        If merged, subtract the same delta_weight from the base weight.
         """
 
         super().unmerge()
@@ -689,32 +683,32 @@ class BLoB(Linear):
         # self.weight.data -= delta_weight.data
         # self.merged = False
 
-#    def kl_loss(self) -> torch.Tensor:
-#        """
-#        If using Bayesian posterior, compute KL(q(A,B) || p(A,B)).
-#        Otherwise, return 0.
-#        """
-#        if self.bayesian_posterior != "diagonal_gaussian":
-#            return torch.tensor(0.0, device=self.weight.device)
-#
-#        # Diagonal Gaussian KL
-#        sigma_A = torch.exp(self.log_sigma_A)
-#        sigma_B = torch.exp(self.log_sigma_B)
-#        prior_std_t = torch.tensor(self.prior_std, device=self.weight.device)
-#
-#        kl_A = (
-#            (sigma_A**2 + self.mu_A**2) / (2.0 * prior_std_t**2)
-#            - 0.5
-#            + self.log_sigma_A
-#            - torch.log(prior_std_t)
-#        )
-#        kl_B = (
-#            (sigma_B**2 + self.mu_B**2) / (2.0 * prior_std_t**2)
-#            - 0.5
-#            + self.log_sigma_B
-#            - torch.log(prior_std_t)
-#        )
-#        return kl_A.sum() + kl_B.sum()
+    #    def kl_loss(self) -> torch.Tensor:
+    #        """
+    #        If using Bayesian posterior, compute KL(q(A,B) || p(A,B)).
+    #        Otherwise, return 0.
+    #        """
+    #        if self.bayesian_posterior != "diagonal_gaussian":
+    #            return torch.tensor(0.0, device=self.weight.device)
+    #
+    #        # Diagonal Gaussian KL
+    #        sigma_A = torch.exp(self.log_sigma_A)
+    #        sigma_B = torch.exp(self.log_sigma_B)
+    #        prior_std_t = torch.tensor(self.prior_std, device=self.weight.device)
+    #
+    #        kl_A = (
+    #            (sigma_A**2 + self.mu_A**2) / (2.0 * prior_std_t**2)
+    #            - 0.5
+    #            + self.log_sigma_A
+    #            - torch.log(prior_std_t)
+    #        )
+    #        kl_B = (
+    #            (sigma_B**2 + self.mu_B**2) / (2.0 * prior_std_t**2)
+    #            - 0.5
+    #            + self.log_sigma_B
+    #            - torch.log(prior_std_t)
+    #        )
+    #        return kl_A.sum() + kl_B.sum()
 
     def __repr__(self):
         base = super().__repr__()
@@ -888,14 +882,15 @@ class BLoBModel(LoraModel):
 
     def __init__(self, model, config, adapter_name, **kwargs):
         super().__init__(model, config, adapter_name, **kwargs)
+
     def _create_and_replace(
-        self,
-        lora_config,
-        adapter_name,
-        target,
-        target_name,
-        parent,
-        current_key,
+            self,
+            lora_config,
+            adapter_name,
+            target,
+            target_name,
+            parent,
+            current_key,
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")

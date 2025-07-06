@@ -26,7 +26,7 @@ import torch.nn.functional as F
 from optimized.layer_norm import MemoryEfficientLayerNorm
 
 from transformers.models.qwen2_audio.configuration_qwen2_audio import Qwen2AudioConfig, Qwen2AudioEncoderConfig
-from transformers.models.qwen2_audio.modeling_qwen2_audio import QWEN2AUDIO_ATTENTION_CLASSES
+# from transformers.models.qwen2_audio.modeling_qwen2_audio import QWEN2AUDIO_ATTENTION_CLASSES
 from transformers.models.qwen2_audio.modeling_qwen2_audio import Qwen2AudioEncoderLayer
 from transformers.models.qwen2_audio.modeling_qwen2_audio import Qwen2AudioEncoder, Qwen2AudioPreTrainedModel
 from transformers.modeling_outputs import BaseModelOutput, ModelOutput
@@ -78,12 +78,12 @@ def _get_unpad_data(attention_mask: torch.Tensor) -> tuple[torch.Tensor, torch.T
     )
 
 
-from transformers.models.qwen2_audio.modeling_qwen2_audio import Qwen2AudioAttention, Qwen2AudioSdpaAttention
+from transformers.models.qwen2_audio.modeling_qwen2_audio import Qwen2AudioAttention
 
 QWEN2AUDIO_ATTENTION_CLASSES_FIX = {
     "eager": Qwen2AudioAttention,
     "flash_attention_2": Qwen2AudioPackedFlashAttention,
-    "sdpa": Qwen2AudioSdpaAttention,
+    "sdpa": Qwen2AudioAttention
 }
 
 
@@ -170,6 +170,7 @@ class MemoryOptimizedQwen2AudioEncoder(Qwen2AudioEncoder):
     Args:
         config: Qwen2AudioEncoderConfig
     """
+    _no_split_modules = ["MemoryOptimizedQwen2AudioEncoderLayer"]
 
     def __init__(self, config: Qwen2AudioEncoderConfig):
         # ignore the init of Qwen2AudioEncoder

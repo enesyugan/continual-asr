@@ -192,6 +192,9 @@ class MemSeq2SeqTrainer(StaticTrainer):
         self.data_called_counter = 0
         self.eval_data_collator = eval_data_collator if eval_data_collator is not None else self.data_collator
 
+    def create_optimizer_and_scheduler(self, num_training_steps: int):
+        # Let HF handle optimizer creation for FSDP models
+        super().create_optimizer_and_scheduler(num_training_steps)
 
     def get_eval_dataloader(self, eval_dataset: Optional[Dataset] = None) -> DataLoader:
         """

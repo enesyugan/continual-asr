@@ -282,6 +282,7 @@ blockReduce(AccumT* smem,
   __syncthreads();
 }
 
+// ILP (Instruction-Level Parallelism)
 template <template<typename, typename> class Reduction, int ILP, typename T, typename AccumT>
 __device__ __forceinline__ AccumT
 ilpReduce(int shift,

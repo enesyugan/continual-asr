@@ -37,7 +37,8 @@ class DataCollatorForQwen2:
                  eos_token="<|endoftext|>",
                  eos_token_id=151643,
                  audio_eos_token_id=151648,
-                 augment=False):
+                 augment=False,
+                 include_text=False):
         self.processor = processor
         self.prompt_template = prompt_template
         self.eos_token = eos_token
@@ -54,6 +55,8 @@ class DataCollatorForQwen2:
             TimeStretch(min_rate=0.9, max_rate=1.2, p=0.5, leave_length_unchanged=False),
             TimeMask(min_band_part=0.0, max_band_part=0.1, p=0.5),
         ])
+
+        self.include_text = include_text
 
     def __call__(self, batch):
         # audio: waveform arrays
@@ -113,7 +116,43 @@ class DataCollatorForQwen2:
             inputs["input_features"] = input_features
         # print(inputs.keys())
 
+        if self.include_text:
+            inputs["tgt_txt"] = [example["text"] for example in batch]
+
         return inputs
+
+    def _concat_prompt(self, target_text, language_token):
+        # add space between or not add space between?
+        return f"{self.prompt_template} {language_token} {target_text} {self.eos_token}"
+
+
+class EvalDataCollatorForQwen2:
+
+    def __init__(self, processor,
+                 prompt_template="<|audio_bos|><|AUDIO|><|audio_eos|> Transcribe this speech:",
+                 eos_token="<|endoftext|>",
+                 eos_token_id=151643,
+                 audio_eos_token_id=151648):
+        self.processor = processor
+        self.prompt_template = prompt_template
+        self.eos_token = eos_token
+        self.eos_token_id = eos_token_id
+        self.audio_eos_token_id = audio_eos_token_id
+
+    def __call__(self, batch):
+        # audio: waveform arrays
+        # audio_list = [example["audio"]["array"] for example in batch]
+        audio_list = [torchaudio.load(sample['wav_path'])[0].squeeze(0).numpy() for sample in batch]
+
+        # Prepare prompt+target format for Qwen2-Audio
+        text_list = [
+            example["text"]
+            for example in batch
+        ]
+
+        data = {"audio": audio_list, "text": text_list}
+
+        return data
 
     def _concat_prompt(self, target_text, language_token):
         # add space between or not add space between?

@@ -5,14 +5,12 @@ import torchaudio
 import soundfile as sf  # fallback if needed
 from audiomentations import Compose, AddGaussianNoise, TimeStretch, TimeMask
 
-
 import os
 import sys
 import re
 import yaml
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 
 
 def normalize_text(utterance, language):
@@ -200,8 +198,21 @@ def get_train_dev(config,
 
         for tr_path in path_list:
             train_data = load_stm_file(tr_path, language,
-                                          lower, remove_punct,
-                                          special_char_removal=special_char_removal).shuffle(seed=seed)
+                                       lower, remove_punct,
+                                       special_char_removal=special_char_removal).shuffle(seed=seed)
+
+            MIN_SECONDS = 1.0
+            MAX_SECONDS = 30.0
+
+            def check_audio_valid(sample):
+                try:
+                    waveform, sr = torchaudio.load(sample['wav_path'])
+                    duration = waveform.shape[1] / sr
+                    return MIN_SECONDS < duration < MAX_SECONDS
+                except Exception:
+                    return False
+
+            train_data = train_data.filter(check_audio_valid, num_proc=8)
 
             if len(dev_path_list) == 0 and dev_split_size != 0:
                 if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(
@@ -218,7 +229,7 @@ def get_train_dev(config,
 
         for dev_path in dev_path_list:
             dev_data = load_stm_file(dev_path, language,
-                                        lower, remove_punct, special_char_removal=special_char_removal)
+                                     lower, remove_punct, special_char_removal=special_char_removal)
 
             if dev_split_size != 0:
                 if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(
@@ -237,7 +248,6 @@ def get_train_dev(config,
 
 
 if __name__ == "__main__":
-
     with open("fisher.yaml", "r") as f:
         data_config = yaml.safe_load(f)
         train_data_dict, dev_data = get_train_dev(data_config)

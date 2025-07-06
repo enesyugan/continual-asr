@@ -1,15 +1,13 @@
 from memory_efficient_whisper import create_whisper_model
 import torch
 from torch import nn
-import os, sys
+import sys
 import signal
 import argparse
-import copy
-from peft import PeftModel
 
 from decode import find_weight_path
-from bnn_lora import BLoBConfig, BLoB, BLoBModel
-from peft import LoraConfig, PeftModel, LoraModel, LoraConfig, get_peft_model
+from loras.bnn_lora import BLoBConfig, BLoB, BLoBModel
+from peft import PeftModel, LoraModel
 from peft import get_peft_model_state_dict
 
 

@@ -6,6 +6,10 @@ import subprocess
 import sys
 import warnings
 import os
+
+# os.environ['CC'] = 'ccache gcc'
+# os.environ['CXX'] = 'ccache g++'
+# os.environ['CUDAHOSTCXX'] = 'ccache g++'
 from datetime import datetime
 
 from torch.utils.cpp_extension import CUDAExtension
@@ -78,16 +82,24 @@ cc_flag = []
 print(cpp_extension.CUDA_HOME)
 _, bare_metal_major, _ = get_cuda_bare_metal_version(cpp_extension.CUDA_HOME)
 
-cc_flag.append('-gencode')
-cc_flag.append('arch=compute_70,code=sm_70')
-cc_flag.append('-gencode')
-cc_flag.append('arch=compute_75,code=sm_75')
-cc_flag.append('-gencode')
-cc_flag.append('arch=compute_80,code=sm_80')
-cc_flag.append('-gencode')
-cc_flag.append('arch=compute_86,code=sm_86')
-cc_flag.append('-gencode')
-cc_flag.append('arch=compute_90,code=sm_90')
+if os.environ.get("DEBUG_BUILD"):
+    cc_flag.append('-gencode')
+    cc_flag.append('arch=compute_89,code=sm_89')
+    print("Compiling in debug mode!")
+else:
+    # cc_flag.append('-gencode')
+    # cc_flag.append('arch=compute_70,code=sm_70')
+    # cc_flag.append('-gencode')
+    # cc_flag.append('arch=compute_75,code=sm_75')
+    cc_flag.append('-gencode')
+    cc_flag.append('arch=compute_80,code=sm_80')
+    # cc_flag.append('-gencode')
+    # cc_flag.append('arch=compute_86,code=sm_86')
+    # cc_flag.append('-gencode')
+    # cc_flag.append('arch=compute_89,code=sm_89')
+    cc_flag.append('-gencode')
+    cc_flag.append('arch=compute_90,code=sm_90')
+
 
 print("\n\ntorch.__version__  = {}\n\n".format(torch.__version__))
 TORCH_MAJOR = int(torch.__version__.split('.')[0])
@@ -153,6 +165,67 @@ ext_modules.append(
                                       'nvcc': ['-O3'] + version_dependent_macros}))
 
 
+ext_modules.append(
+    CUDAExtension(name='fast_rms_norm_cuda',
+                  sources=['rms_norm/rms_api.cpp',
+                           'rms_norm/rms_fwd_cuda_kernel.cu',
+                           'rms_norm/rms_bwd_semi_cuda_kernel.cu'
+                           ],
+                  include_dirs=[os.path.join(this_dir, 'include')],
+                  extra_compile_args={'cxx': ['-O3'] + version_dependent_macros + generator_flag,
+                                      'nvcc': ['-O3',
+                                               '-U__CUDA_NO_HALF_OPERATORS__',
+                                               '-U__CUDA_NO_HALF_CONVERSIONS__',
+                                               '-U__CUDA_NO_BFLOAT16_OPERATORS__',
+                                               '-U__CUDA_NO_BFLOAT16_CONVERSIONS__',
+                                               '-U__CUDA_NO_BFLOAT162_OPERATORS__',
+                                               '-U__CUDA_NO_BFLOAT162_CONVERSIONS__',
+                                               '--expt-relaxed-constexpr',
+                                               '--expt-extended-lambda',
+                                               '--use_fast_math'] + cc_flag
+                                              + version_dependent_macros + generator_flag}))
+
+
+ext_modules.append(
+        CUDAExtension(
+            name="fused_normalizations",
+            sources=["apex_norms/normalizations.cpp", "apex_norms/normalization_kernels.cu"],
+            extra_compile_args={
+                "cxx": ["-O3"] + version_dependent_macros,
+                "nvcc": ["-maxrregcount=50", "-O3", "--use_fast_math"] + version_dependent_macros + cc_flag,
+            },
+        )
+    )
+
+cutlass_examples_dir = os.path.join(this_dir, "third_party", "cutlass", "examples")
+cutlass_include_dir = os.path.join(this_dir, "third_party", "cutlass", "include")
+cutlass_util_dir = os.path.join(this_dir, "third_party", "cutlass", "tools", "util", "include")
+
+include_dirs=[os.path.join(this_dir, 'include')]
+include_dirs += [
+            cutlass_include_dir,
+            cutlass_util_dir,
+            cutlass_examples_dir,
+        ]
+ext_modules.append(
+    CUDAExtension(name='swiglu_mlp_cuda',
+                  sources=['swiglu_mlp/swiglu_mlp_api.cpp',
+                           'swiglu_mlp/dual_gemm_lhs_silu_mul.cu',
+                           'swiglu_mlp/bi_gemm_sum.cu',
+                           'swiglu_mlp/swiglu_bw_fused.cu'],
+                  include_dirs=include_dirs,
+                  extra_compile_args={"cxx": ["-O3"] + version_dependent_macros + [f'-DXENTROPY_VER="{xentropy_ver}"'],
+                                      'nvcc': ['-O3',
+                                               '-U__CUDA_NO_HALF_OPERATORS__',
+                                               '-U__CUDA_NO_HALF_CONVERSIONS__',
+                                               '-U__CUDA_NO_BFLOAT16_OPERATORS__',
+                                               '-U__CUDA_NO_BFLOAT16_CONVERSIONS__',
+                                               '-U__CUDA_NO_BFLOAT162_OPERATORS__',
+                                               '-U__CUDA_NO_BFLOAT162_CONVERSIONS__',
+                                               '--expt-relaxed-constexpr',
+                                               '--expt-extended-lambda',
+                                               '--use_fast_math'] + cc_flag
+                                               + version_dependent_macros + generator_flag}))
 
 
 setup(

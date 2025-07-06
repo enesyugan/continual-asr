@@ -1,9 +1,3 @@
-import copy
-
-import evaluate
-import sacrebleu
-from dataclasses import dataclass
-from typing import Any, Dict, List, Union
 import torch.multiprocessing as mp
 from peft import PeftModel
 
@@ -22,8 +16,7 @@ from tqdm import tqdm
 
 # import re
 import transformers
-from transformers import WhisperFeatureExtractor, WhisperTokenizer, WhisperProcessor, WhisperForConditionalGeneration, \
-    AutoProcessor, AutoTokenizer, EarlyStoppingCallback, SeamlessM4Tv2ForSpeechToText
+from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from torch.utils.data import DataLoader, Subset
 from jiwer import wer, cer
 import jiwer
@@ -35,12 +28,10 @@ import sys
 import argparse
 
 from decode_utils import (DataCollatorSpeechSeq2SeqWithPadding,
-                          load_asr_dataset,
-                          compute_metrics,
-                          remove_special_characters)
+                          load_asr_dataset)
 
 from memory_efficient_whisper import create_whisper_model
-from bnn_lora import BayesianLinear, BayesianLoraConfig
+from loras.bnn_lora import BayesianLinear, BayesianLoraConfig
 
 
 def split_dataset(dataset, num_chunks):

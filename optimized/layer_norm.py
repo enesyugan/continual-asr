@@ -1,4 +1,5 @@
 import torch
+from optimized.utils import _cast_if_autocast_enabled
 
 try:
     import fast_layer_norm_cuda
@@ -41,16 +42,6 @@ class FastLayerNormFN(torch.autograd.Function):
         return dx, dgamma, dbeta, None, None
 
 
-def _cast_if_autocast_enabled(*args):
-    if not torch.is_autocast_enabled():
-        return args
-    else:
-        try:
-            return torch.amp.autocast_mode._cast(args, 'cuda', torch.get_autocast_gpu_dtype())
-        except AttributeError:
-            return torch.amp.autocast_mode._cast(args, 'cuda', torch.half)
-
-
 def fast_layer_norm_affine(input, weight, bias, normalized_shape, eps=1e-5, memory_efficient=False):
     args = _cast_if_autocast_enabled(input, weight, bias, eps, memory_efficient)
     with torch.amp.autocast('cuda', enabled=False):
@@ -85,4 +76,3 @@ class MemoryEfficientLayerNorm(torch.nn.LayerNorm):
     def extra_repr(self):
         return '{normalized_shape}, eps={eps}, ' \
                'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
-

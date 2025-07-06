@@ -1,268 +1,46 @@
 from pathlib import Path
 import re
 import json
-
+import argparse
+from transformers import AutoProcessor
+from transformers import AutoConfig
+from transformers.feature_extraction_utils import BatchFeature
 import torch.multiprocessing as mp
+from collator import EvalDataCollatorForQwen2
+from tqdm import tqdm
+import jiwer
+from jiwer import wer, cer
 
 mp.set_start_method('spawn', force=True)
 import os
 import signal
-from tqdm import tqdm
-
-# from sklearn.metrics import classification_report
-# from datasets import load_dataset, ClassLabel, Features, Value, Dataset, Audio, concatenate_datasets
-# from pydub import AudioSegment
-# import sacrebleu
-# from peft import PeftModel, PeftConfig
-# from transformers import WhisperForConditionalGeneration, Seq2SeqTrainer
-# from torch import nn
-
-# import re
-import transformers
-from transformers import AutoProcessor
-from torch.utils.data import DataLoader, Subset
-from jiwer import wer, cer
-import jiwer
+import sys
 
 import torch
 from torch import nn
+from torch.utils.data import DataLoader, Subset
+from qwen2.qwen2model import create_qwen2audio_model
+from whisper.decode_utils import remove_special_characters
 
-import sys
-import argparse
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 
-from decode_utils import (DataCollatorSpeechSeq2SeqWithPadding,
-                          load_asr_dataset,
-                          remove_special_characters)
-
-from memory_efficient_whisper import create_whisper_model
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from qwen2.models.qwen2audio_attention import Qwen2AudioFlashAttentionNoPad
 from loras.bnn_lora import BLoBConfig, BLoB, BLoBModel  # BayesianLinear, BayesianLoraConfig
 from peft import PeftModel, LoraModel
 
-import warnings
+# from transformers.models.qwen2_audio.modeling_qwen2_audio import QWEN2AUDIO_ATTENTION_CLASSES
 
-# to exclude warnings from HuggingFace about their own new classes
-warnings.filterwarnings("ignore", message="custom logits")
+# test command:
+# python -m qwen2.test_qwen
 
+# Inject your class into the registry
+# QWEN2AUDIO_ATTENTION_CLASSES["flash_attention_2"] = Qwen2AudioFlashAttentionNoPad
+# QWEN2AUDIO_ATTENTION_CLASSES["eager"] = Qwen2AudioAttentionNoMask
 
-def split_dataset(dataset, num_chunks):
-    """Splits dataset into `num_chunks` evenly."""
-    num_samples = len(dataset)
-    indices = torch.arange(num_samples)
-    chunk_size = (num_samples + num_chunks - 1) // num_chunks
-    return [Subset(dataset, indices[i * chunk_size: (i + 1) * chunk_size]) for i in range(num_chunks)]
-
-
-def load_model_and_decode(rank, dataset_split, model_path, lora_path, auto_find_checkpoint, tokenizer_path,
-                          tgt_lang, custom_lora, device_id, batch_size, beam_size,
-                          no_repeat_ngram_size, total_samples,
-                          no_progress_bar, lora_weights, result_queue):
-    def pprint(*args, **kwargs):
-
-        if rank > 0:
-            return
-
-        print(*args, **kwargs)
-
-    """Loads model on specific GPU and decodes its chunk."""
-    torch.cuda.set_device(device_id)
-
-    device = torch.device(f"cuda:{rank}")
-    device = device if torch.cuda.is_available() else "cpu"
-    torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-    model = create_whisper_model(model_path, torch_dtype,
-                                 attn_implementation="flash_attention_2",
-                                 low_cpu_mem_usage=True,
-                                 device_map={"": device})
-
-    if lora_path is not None and len(lora_path) > 0:
-
-        lora_paths = lora_path.split("|")
-        main_model = model
-
-        # print(lora_paths)
-        weight_path = str(find_weight_path(lora_paths[0], auto_find_checkpoint))
-
-        pprint("[INFO] Loading LORA weights from {}".format(weight_path))
-        if custom_lora:
-
-            LoraModel._create_and_replace = BLoBModel._create_and_replace
-
-            lora_config = BLoBConfig.from_pretrained(weight_path)
-            pprint(lora_config)
-            lora_config._register_custom_module({nn.Linear: BLoB})
-            main_model = PeftModel.from_pretrained(main_model, model_id=weight_path, config=lora_config)
-
-            main_model.merge_and_unload()
-        else:
-            main_model = PeftModel.from_pretrained(main_model, weight_path)
-            main_model.merge_and_unload()
-        # checkpoint = main_model.state_dict()
-
-        if len(lora_weights) > 0:
-            lora_weights = [float(x) for x in lora_weights.split("|")]
-
-            assert len(lora_weights) >= len(lora_paths)
-            lora_weights = lora_weights[:len(lora_paths)]
-
-            _sum = sum(lora_weights)
-            for i in range(len(lora_weights)):
-                lora_weights[i] = lora_weights[i] / _sum
-        else:
-            lora_weights = [1 / len(lora_paths)] * len(lora_paths)
-
-        if len(lora_paths) > 1:
-
-            # averaging the parameters
-
-            for _idx, _lora_path in enumerate(lora_paths[1:]):
-                new_model = create_whisper_model(model_path, torch_dtype,
-                                                 attn_implementation="flash_attention_2",
-                                                 low_cpu_mem_usage=True,
-                                                 device_map={"": device})
-
-                _weight_path = str(find_weight_path(_lora_path, auto_find_checkpoint))
-                pprint("[INFO] Loading LORA weights from {}".format(_weight_path))
-
-                if custom_lora:
-
-                    LoraModel._create_and_replace = BLoBModel._create_and_replace
-
-                    lora_config = BLoBConfig.from_pretrained(_weight_path)
-                    print(lora_config)
-                    lora_config._register_custom_module({nn.Linear: BLoB})
-                    new_model = PeftModel.from_pretrained(new_model, model_id=_weight_path, config=lora_config)
-
-                    new_model.merge_and_unload()
-                else:
-                    new_model = PeftModel.from_pretrained(new_model, _weight_path)
-                    new_model.merge_and_unload()
-
-                # new_model = PeftModel.from_pretrained(new_model, _weight_path)
-                # new_model.merge_and_unload()
-
-                for (main_param, param) in zip(main_model.parameters(), new_model.parameters()):
-
-                    if _idx == 0:
-                        main_param.data.mul_(lora_weights[0]).add_(param.data.mul_(lora_weights[1 + _idx]))
-                    else:
-                        main_param.data.add_(param.data.mul_(lora_weights[1 + _idx]))
-
-            # for main_param in main_model.parameters():
-            #     main_param.data.div_(len(lora_paths))
-
-        model = main_model
-
-    if len(tokenizer_path) > 0:
-        upstream_model = tokenizer_path  # "openai/whisper-large-v3-turbo"
-    else:
-        upstream_model = model_path
-
-    processor = AutoProcessor.from_pretrained(upstream_model)
-
-    zh_id = processor.tokenizer.convert_tokens_to_ids("<|zh|>")
-    en_id = processor.tokenizer.convert_tokens_to_ids("<|en|>")
-    es_id = processor.tokenizer.convert_tokens_to_ids("<|es|>")
-    de_id = processor.tokenizer.convert_tokens_to_ids("<|de|>")
-
-    transcribe_id = processor.tokenizer.convert_tokens_to_ids("<|transcribe|>")
-    notimestamps_id = processor.tokenizer.convert_tokens_to_ids("<|notimestamps|>")
-    # print(f"zh: {zh_id} en: {en_id} es: {es_id} de: {de_id}")
-    forced_decoder_ids = list()
-    # print(model.generation_config.forced_decoder_ids[0], flush=True)
-    # print(ASD)
-    if tgt_lang == "":
-        forced_decoder_ids.append(model.generation_config.forced_decoder_ids[0])
-    else:
-        tgt_lang_id = processor.tokenizer.convert_tokens_to_ids(tgt_lang)
-        pprint(f"Set target lang:{tgt_lang} id: {tgt_lang_id}")
-        forced_decoder_ids.append([1, tgt_lang_id])
-
-    forced_decoder_ids.append([2, transcribe_id])
-    forced_decoder_ids.append([3, notimestamps_id])
-
-    model.config.forced_decoder_ids = None
-    model.config.suppress_tokens = []
-
-    # model = torch.compile(model)
-    model.cuda()
-    model.eval()
-
-    data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor, text_processor=processor.tokenizer)
-
-    data_loader = DataLoader(
-        dataset=dataset_split,
-        batch_size=batch_size,
-        collate_fn=data_collator,
-        shuffle=False)
-
-    def to_cuda_recursive(data, device, dtype=torch.float32):
-        if isinstance(data, torch.Tensor):
-            return data.to(device, dtype=dtype)
-        elif isinstance(data, list):
-            return [to_cuda_recursive(item, device, dtype=dtype) for item in data]
-        elif isinstance(data, dict):
-            return {key: to_cuda_recursive(value, device, dtype=dtype) for key, value in data.items()}
-        elif isinstance(data, transformers.feature_extraction_utils.BatchFeature):
-            return {key: to_cuda_recursive(value, device, dtype=dtype) for key, value in data.items()}
-        else:
-            return data
-
-    target_lst = list()
-    predictions_lst = list()
-    target_language_lst = list()
-
-    model.generation_config.forced_decoder_ids = forced_decoder_ids
-    model.generation_config.num_return_sequences = 1
-    model.generation_config.num_beams = beam_size
-    model.generation_config.no_repeat_ngram_size = no_repeat_ngram_size
-    model.generation_config.max_new_tokens = 255
-
-    language_tokens = [t for t in processor.tokenizer.additional_special_tokens if len(t) == 6]
-    language_ids = [processor.tokenizer.convert_tokens_to_ids(x) for x in language_tokens]
-
-    # if rank == 0:
-    #     print(language_tokens)
-    #     print(language_ids)
-
-    # if not no_progress_bar:
-    #     progress_bar = tqdm(total=total_samples, position=rank, desc=f"GPU {device_id}", leave=True)
-    # else:
-    #     progress_bar = None
-
-    with torch.no_grad(), torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-        for idx, batch_ in tqdm(enumerate(data_loader), total=len(data_loader), position=rank,
-                                desc=f"GPU {device_id}", leave=True,
-                                disable=no_progress_bar):
-            path_lst = batch_.pop("paths")
-            target = batch_.pop("tgt_txt")
-            uid = batch_.pop("uid")
-            language = batch_.pop("lang_labels")
-            # target_language_lst.extend(processor.batch_decode(language, skip_special_tokens=False))
-            # print(batch_)
-            for t in target:
-                t = t.split(" ", 1)[-1].replace("<|endoftext|>", "")
-                target_lst.append(t)
-            # print(target_lst)
-            # target_lst.extend(target)
-            batch = to_cuda_recursive(batch_, device, torch_dtype)
-
-            output_tokens = model.generate(input_features=batch["input_features"],
-                                           generation_config=model.generation_config)
-            # forced_decoder_ids=forced_decoder_ids, num_return_sequences=1, num_beams=10, no_repeat_ngram_size=4,
-            # max_new_tokens=255)#, task="transcribe") print(output_tokens)
-            pred_transcript = processor.batch_decode(output_tokens, skip_special_tokens=True)
-            # print(uid)
-            predictions_lst.extend(pred_transcript)
-
-            if idx == 3:
-                print(f"target: {target_lst}")
-                print(f"pred_language: {predictions_lst}")
-            # else:
-            #     continue
-
-    results = list(zip(predictions_lst, target_lst))
-
-    result_queue.put(results)
+# attention_type = "eager"
+attention_type = "flash_attention_2"
 
 
 def find_weight_path(weight_path, auto_find_checkpoint="none"):
@@ -313,8 +91,251 @@ def find_weight_path(weight_path, auto_find_checkpoint="none"):
             return earliest_ckpt
 
 
-if __name__ == "__main__":
+def split_dataset(dataset, num_chunks):
+    """Splits dataset into `num_chunks` evenly."""
+    num_samples = len(dataset)
+    indices = torch.arange(num_samples)
+    chunk_size = (num_samples + num_chunks - 1) // num_chunks
+    return [Subset(dataset, indices[i * chunk_size: (i + 1) * chunk_size]) for i in range(num_chunks)]
 
+
+def load_model_and_decode(rank, dataset_split, model_path, lora_path, auto_find_checkpoint, tokenizer_path,
+                          tgt_lang, custom_lora, device_id, batch_size, beam_size,
+                          no_repeat_ngram_size, total_samples,
+                          no_progress_bar, lora_weights, result_queue):
+    def pprint(*args, **kwargs):
+        if rank > 0:
+            return
+
+        print(*args, **kwargs)
+
+    """Loads model on specific GPU and decodes its chunk."""
+    torch.cuda.set_device(device_id)
+
+    device = torch.device(f"cuda:{rank}")
+    device = device if torch.cuda.is_available() else "cpu"
+    torch_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+
+    config = AutoConfig.from_pretrained("Qwen/Qwen2-Audio-7B", trust_remote_code=True)
+
+    model = create_qwen2audio_model("Qwen/Qwen2-Audio-7B", config,
+                                    torch_dtype=torch_dtype,
+                                    trust_remote_code=True,
+                                    low_cpu_mem_usage=True,
+                                    attn_implementation=attention_type,
+                                    mem_efficient=True,
+                                    device_map={"": device})
+
+    if lora_path is not None and len(lora_path) > 0:
+
+        lora_paths = lora_path.split("|")
+        main_model = model
+
+        # print(lora_paths)
+        weight_path = str(find_weight_path(lora_paths[0], auto_find_checkpoint))
+
+        pprint("[INFO] Loading LORA weights from {}".format(weight_path))
+        if custom_lora:
+
+            LoraModel._create_and_replace = BLoBModel._create_and_replace
+
+            lora_config = BLoBConfig.from_pretrained(weight_path)
+            pprint(lora_config)
+            lora_config._register_custom_module({nn.Linear: BLoB})
+            main_model = PeftModel.from_pretrained(main_model, model_id=weight_path, config=lora_config)
+
+            main_model.merge_and_unload()
+        else:
+            main_model = PeftModel.from_pretrained(main_model, weight_path)
+            main_model.merge_and_unload()
+        # checkpoint = main_model.state_dict()
+
+        if len(lora_weights) > 0:
+            lora_weights = [float(x) for x in lora_weights.split("|")]
+
+            assert len(lora_weights) >= len(lora_paths)
+            lora_weights = lora_weights[:len(lora_paths)]
+
+            _sum = sum(lora_weights)
+            for i in range(len(lora_weights)):
+                lora_weights[i] = lora_weights[i] / _sum
+        else:
+            lora_weights = [1 / len(lora_paths)] * len(lora_paths)
+
+        if len(lora_paths) > 1:
+
+            # averaging the parameters
+
+            for _idx, _lora_path in enumerate(lora_paths[1:]):
+                new_model = create_qwen2audio_model("Qwen/Qwen2-Audio-7B", config,
+                                                    torch_dtype=torch_dtype,
+                                                    trust_remote_code=True,
+                                                    low_cpu_mem_usage=True,
+                                                    attn_implementation=attention_type,
+                                                    mem_efficient=True,
+                                                    device_map={"": device})
+
+                _weight_path = str(find_weight_path(_lora_path, auto_find_checkpoint))
+                pprint("[INFO] Loading LORA weights from {}".format(_weight_path))
+
+                if custom_lora:
+
+                    LoraModel._create_and_replace = BLoBModel._create_and_replace
+
+                    lora_config = BLoBConfig.from_pretrained(_weight_path)
+                    print(lora_config)
+                    lora_config._register_custom_module({nn.Linear: BLoB})
+                    new_model = PeftModel.from_pretrained(new_model, model_id=_weight_path, config=lora_config)
+
+                    new_model.merge_and_unload()
+                else:
+                    new_model = PeftModel.from_pretrained(new_model, _weight_path)
+                    new_model.merge_and_unload()
+
+                # new_model = PeftModel.from_pretrained(new_model, _weight_path)
+                # new_model.merge_and_unload()
+
+                for (main_param, param) in zip(main_model.parameters(), new_model.parameters()):
+
+                    if _idx == 0:
+                        main_param.data.mul_(lora_weights[0]).add_(param.data.mul_(lora_weights[1 + _idx]))
+                    else:
+                        main_param.data.add_(param.data.mul_(lora_weights[1 + _idx]))
+
+            # for main_param in main_model.parameters():
+            #     main_param.data.div_(len(lora_paths))
+
+        model = main_model
+
+    if len(tokenizer_path) > 0:
+        upstream_model = tokenizer_path  # "openai/whisper-large-v3-turbo"
+    else:
+        upstream_model = model_path
+
+    processor = AutoProcessor.from_pretrained(upstream_model)
+
+    model.cuda()
+    model.eval()
+
+    data_collator = EvalDataCollatorForQwen2(processor,
+                                             prompt_template="<|audio_bos|><|AUDIO|><|audio_eos|> Transcribe this speech:",
+                                             eos_token="<|endoftext|>")
+
+    data_loader = DataLoader(
+        dataset=dataset_split,
+        batch_size=batch_size,
+        collate_fn=data_collator,
+        shuffle=False)
+
+    def to_cuda_recursive(data, device, dtype=torch.float32):
+        if isinstance(data, torch.Tensor):
+            return data.to(device, dtype=dtype)
+        elif isinstance(data, list):
+            return [to_cuda_recursive(item, device, dtype=dtype) for item in data]
+        elif isinstance(data, dict):
+            return {key: to_cuda_recursive(value, device, dtype=dtype) for key, value in data.items()}
+        elif isinstance(data, BatchFeature):
+            return {key: to_cuda_recursive(value, device, dtype=dtype) for key, value in data.items()}
+        else:
+            return data
+
+    target_lst = list()
+    predictions_lst = list()
+    target_language_lst = list()
+
+    with torch.no_grad(), torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        for idx, batch_ in tqdm(enumerate(data_loader), total=len(data_loader), position=rank,
+                                desc=f"GPU {device_id}", leave=True,
+                                disable=no_progress_bar):
+
+            audios = batch_["audio"]
+            refs = batch_["text"]
+
+            prompts = [
+                "<|audio_bos|><|AUDIO|><|audio_eos|>Transcribe this speech:"
+                for _ in audios
+            ]
+
+            inputs = processor(
+                text=prompts,
+                audio=audios,
+                return_tensors="pt",
+                add_special_tokens=True,
+                sampling_rate=16000,
+                padding=True  # <- pads input_ids and audio
+            )
+
+            # move inputs to device
+            for key in inputs:
+                inputs[key] = inputs[key].to(device)
+
+            generated_ids = model.generate(
+                **inputs,
+                max_length=1024,
+                num_beams=beam_size,
+                no_repeat_ngram_size=no_repeat_ngram_size,
+                # repetition_penalty=1.2,
+                # length_penalty=0.9,
+                early_stopping=True,
+                # 🔥 Remove top_k / top_p when not sampling
+                # top_k=0,
+                # top_p=0.01,
+            )
+
+            # Remove prompt tokens
+            prompt_lens = inputs["input_ids"].ne(processor.tokenizer.pad_token_id).sum(dim=1)
+            clean_outputs = [
+                gen_ids[prompt_len:] for gen_ids, prompt_len in zip(generated_ids, prompt_lens)
+            ]
+
+            generated_ids = generated_ids[:, inputs.input_ids.size(1):]
+            # Decode
+
+            responses = processor.batch_decode(
+                clean_outputs,
+                skip_cspecial_tokens=True,
+                clean_up_tokenization_spaces=True
+            )
+
+            def strip_known_tags(text):
+
+                for tag in ["<|en|>", "<|endoftext|>", "<|AUDIO|>", "<|audio_eos|>", "[noise]", "<|audio_bos|>"]:
+                    text = text.replace(tag, "")
+
+                text = text.strip()
+
+                if text.startswith("Transcribe this speech:"):
+                    text = text[len("Transcribe this speech:"):]
+
+                def remove_bracket_tags(text):
+                    # Removes [anything in square brackets], including the brackets
+                    return re.sub(r'\[[^\]]*\]', '', text).strip()
+
+                text = remove_bracket_tags(text)
+
+                def remove_language_tags(text):
+                    return re.sub(r'<\|[a-zA-Z_-]+?\|>', '', text)
+
+                text = remove_language_tags(text)
+
+                return text
+
+            pred_transcript = [strip_known_tags(d) for d in responses]
+            predictions_lst.extend(pred_transcript)
+            target_lst.extend(refs)
+
+            if device_id == 0:
+                for i in range(len(refs)):
+                    print(f"[REF]: {refs[i]}")
+                    print(f"[HYP]: {pred_transcript[i]}")
+                    print("")
+
+    results = list(zip(predictions_lst, target_lst))
+
+    result_queue.put(results)
+
+
+if __name__ == "__main__":
     def handle_sigint(sig, frame):
         print("\nReceived Ctrl+C, terminating all processes...")
         sys.exit(0)
@@ -364,13 +385,14 @@ if __name__ == "__main__":
                         help="Automatically find checkpoint to easily use with huggingface training/tuning. Options: none|best|latest")
 
     args = parser.parse_args()
+    args.no_progress_bar = True
 
     test_path = args.test_stm
 
-    # for arzen it should be ar en
-    language_list = ["en"]
-    test_dataset = load_asr_dataset(test_path, language=language_list,
-                                    special_char_removal=not args.keep_special_character)
+    from qwen2.stm_to_dataset import load_stm_file
+
+    test_dataset = load_stm_file(test_path, lower=True, remove_punct=True, special_char_removal=True)
+
     print(test_dataset)
 
     num_gpus = torch.cuda.device_count()
@@ -407,7 +429,6 @@ if __name__ == "__main__":
                               args.batch_size, args.beam_size, args.no_repeat_ngram_size, total_size,
                               args.no_progress_bar, args.lora_weights, result_queue)
 
-    # Collect results
     final_results = []
     for _ in range(num_gpus):
         final_results.extend(result_queue.get())
@@ -422,7 +443,7 @@ if __name__ == "__main__":
     clean_predictions = list()
     for text in predictions_lst:
         if not args.keep_special_character:
-            text = remove_special_characters(text)
+            text = remove_special_characters(text).strip()
         clean_predictions.append(text)
 
     outdir = os.path.basename(args.test_stm).replace(".stm", "")
@@ -444,6 +465,12 @@ if __name__ == "__main__":
     wer_error = wer(target_lst, clean_predictions)
     cer_error = cer(target_lst, clean_predictions)
 
+    # ref_str = " ".join(target_lst)
+    # hyp_str = " ".join(clean_predictions)
+    #
+    # wer_score = jiwer.wer(ref_str, hyp_str)
+    # cer_score = jiwer.cer(ref_str, hyp_str)
+
     with open(os.path.join(outdir, "error_rates.txt"), "w") as f:
 
         f.write("WER: {}\n".format(wer_error))
@@ -451,15 +478,15 @@ if __name__ == "__main__":
         print("WER: {}".format(wer_error))
         print("CER: {}".format(cer_error))
 
-    out = jiwer.process_words(target_lst,
-                              clean_predictions)
-
-    # , reference_transform=jiwer.wer_standardize, hypothesis_transform=jiwer.wer_standardize)
-    with open(os.path.join(outdir, "w.eval.txt"), "w") as f:
-        f.write(jiwer.visualize_alignment(out))
-
-    out = jiwer.process_characters(target_lst,
-                                   clean_predictions)
-    # , reference_transform=jiwer.wer_standardize, hypothesis_transform=jiwer.wer_standardize)
-    with open(os.path.join(outdir, "c.eval.txt"), "w") as f:
-        f.write(jiwer.visualize_alignment(out))
+    # out = jiwer.process_words(target_lst,
+    #                           clean_predictions)
+    #
+    # # , reference_transform=jiwer.wer_standardize, hypothesis_transform=jiwer.wer_standardize)
+    # with open(os.path.join(outdir, "w.eval.txt"), "w") as f:
+    #     f.write(jiwer.visualize_alignment(out))
+    #
+    # out = jiwer.process_characters(target_lst,
+    #                                clean_predictions)
+    # # , reference_transform=jiwer.wer_standardize, hypothesis_transform=jiwer.wer_standardize)
+    # with open(os.path.join(outdir, "c.eval.txt"), "w") as f:
+    #     f.write(jiwer.visualize_alignment(out))
