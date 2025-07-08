@@ -19,25 +19,40 @@ QWEN2_LANG_TO_TOKEN = {
 LANG_TOKENS = set(QWEN2_LANG_TO_TOKEN.values())
 
 
-def load_audio(wav_path, augment=False, time_stretch=None,
-               spec_time_masking=None,
-               freq_time_masking=None):
+def load_audio_segment(wav_path, start_ms=-1, end_ms=-1):
+    info = torchaudio.info(wav_path)
+    sample_rate = info.sample_rate
 
-    audio = torchaudio.load(wav_path)
-
-
+    if start_ms is not None and end_ms is not None and end_ms > start_ms:
+        start_sec = start_ms / 1000.0
+        end_sec = end_ms / 1000.0
+        frame_offset = int(start_sec * sample_rate)
+        num_frames = int((end_sec - start_sec) * sample_rate)
+        waveform, sr = torchaudio.load(
+            wav_path,
+            frame_offset=frame_offset,
+            num_frames=num_frames
+        )
+    else:
+        waveform, sr = torchaudio.load(wav_path)
+    return waveform, sr
 
 
 class DataCollatorForQwen2:
-
     spec_time_masking = T.TimeMasking(time_mask_param=30)
     spec_freq_masking = T.FrequencyMasking(freq_mask_param=30)
+    wav_augment = Compose([
+        AddGaussianNoise(min_amplitude=0.001, max_amplitude=0.015, p=0.5),
+        TimeStretch(min_rate=0.9, max_rate=1.2, p=0.5, leave_length_unchanged=False),
+        TimeMask(min_band_part=0.0, max_band_part=0.1, p=0.5),
+    ])
     def __init__(self, processor,
                  prompt_template="<|audio_bos|><|AUDIO|><|audio_eos|> Transcribe this speech:",
                  eos_token="<|endoftext|>",
                  eos_token_id=151643,
                  audio_eos_token_id=151648,
-                 augment=False,
+                 wav_augment=False,
+                 spec_augment=False,
                  include_text=False):
         self.processor = processor
         self.prompt_template = prompt_template
@@ -49,19 +64,28 @@ class DataCollatorForQwen2:
 
         self.lang_ids = {token: processor.tokenizer.convert_tokens_to_ids(token) for token in LANG_TOKENS}
 
-        self.do_augment = augment
-        self.audio_augment = Compose([
-            AddGaussianNoise(min_amplitude=0.001, max_amplitude=0.015, p=0.5),
-            TimeStretch(min_rate=0.9, max_rate=1.2, p=0.5, leave_length_unchanged=False),
-            TimeMask(min_band_part=0.0, max_band_part=0.1, p=0.5),
-        ])
+        self.do_wav_augment = wav_augment
+        self.do_spec_augment = spec_augment
 
         self.include_text = include_text
 
     def __call__(self, batch):
         # audio: waveform arrays
         # audio_list = [example["audio"]["array"] for example in batch]
-        audio_list = [torchaudio.load(sample['wav_path'])[0].squeeze(0).numpy() for sample in batch]
+
+        if not self.do_wav_augment:
+            audio_list = [load_audio_segment(sample['wav_path'], sample['start'], sample['end'])[0].squeeze(0).numpy()
+                          for sample in batch]
+        else:
+            audio_list = list()
+            for sample in batch:
+                audio_sample, sample_rate = load_audio_segment(sample['wav_path'], sample['start'], sample['end'])
+                # change squeeze(0) to mean(dim=0)
+                audio_sample = audio_sample.mean(dim=0).numpy()
+                if self.do_wav_augment:
+                    audio_sample = self.wav_augment(audio_sample, sample_rate)
+
+                audio_list.append(audio_sample)
 
         # Prepare prompt+target format for Qwen2-Audio
         text_list = [
@@ -109,7 +133,7 @@ class DataCollatorForQwen2:
         # labels.masked_fill_(attention_mask.ne(1), -100)
         inputs["labels"] = labels
 
-        if self.do_augment:
+        if self.do_spec_augment:
             input_features = inputs["input_features"]
             input_features = self.spec_time_masking(input_features)
             input_features = self.spec_freq_masking(input_features)
@@ -142,7 +166,12 @@ class EvalDataCollatorForQwen2:
     def __call__(self, batch):
         # audio: waveform arrays
         # audio_list = [example["audio"]["array"] for example in batch]
-        audio_list = [torchaudio.load(sample['wav_path'])[0].squeeze(0).numpy() for sample in batch]
+        # audio_list = [torchaudio.load(sample['wav_path'])[0].squeeze(0).numpy() for sample in batch]
+        # audio
+        audio_list = [load_audio_segment(sample['wav_path'], sample['start'], sample['end'])[0].squeeze(0).numpy()
+                      for sample in batch]
+
+        audio_file_list = [sample['wav_path'] for sample in batch]
 
         # Prepare prompt+target format for Qwen2-Audio
         text_list = [
@@ -150,7 +179,7 @@ class EvalDataCollatorForQwen2:
             for example in batch
         ]
 
-        data = {"audio": audio_list, "text": text_list}
+        data = {"audio": audio_list, "text": text_list, "audio_files": audio_file_list}
 
         return data
 

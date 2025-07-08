@@ -95,6 +95,9 @@ def load_stm_file(stm_path,
                 uid, wavpath, start, end, duration = parts[:5]
                 transcript = " ".join(parts[5:])
 
+            start = float(start)
+            end = float(end)
+
             duration = float(duration)  # ms
             if duration < 500 or duration > 20000:
                 skipped += 1
@@ -115,8 +118,13 @@ def load_stm_file(stm_path,
 
             transcript = " ".join(transcript.split())
 
+            if start < 0:
+                assert end < 0;
+
             entries.append({
                 "id": uid,
+                "start": start,
+                "end": end,
                 "wav_path": wav_path,
                 "duration": duration,
                 "text": transcript,

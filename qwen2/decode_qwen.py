@@ -250,6 +250,7 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, auto_find_
 
             audios = batch_["audio"]
             refs = batch_["text"]
+            audio_files = batch_["audio_files"]
 
             prompts = [
                 "<|audio_bos|><|AUDIO|><|audio_eos|>Transcribe this speech:"
@@ -320,7 +321,7 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, auto_find_
 
                 return text
 
-            pred_transcript = [strip_known_tags(d) for d in responses]
+            pred_transcript = [strip_known_tags(d).strip() for d in responses]
             predictions_lst.extend(pred_transcript)
             target_lst.extend(refs)
 

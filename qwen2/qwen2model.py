@@ -52,7 +52,7 @@ from qwen2.models.qwen_audio_encoder import MemoryOptimizedQwen2AudioEncoderLaye
 from transformers.processing_utils import Unpack
 from transformers.models.llama.modeling_llama import KwargsForCausalLM
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
-from transformers.models.qwen2.modeling_qwen2 import Qwen2DecoderLayer
+
 
 try:
     import xentropy_cuda
@@ -227,8 +227,6 @@ class MemoryEfficientQwen2AudioLM(Qwen2AudioForConditionalGeneration):
 
         self.freeze_audio_encoder = False
         self.label_smoothing = 0.0
-
-        print(type(self.language_model))
 
     # @property
     # def padding_side(self):
@@ -859,3 +857,14 @@ def create_qwen2audio_model(model_name,
             replace_mlp_with_memory_efficient(model)
 
     return model
+
+
+def set_attention_dropout(model, dropout_prob):
+    for name, module in model.named_modules():
+        # Qwen2 uses Qwen2Attention as the class name for attention layers
+        if module.__class__.__name__ == "Qwen2Attention":
+            # Replace the Dropout module
+            # module.dropout = nn.Dropout(dropout_prob)
+            module.attention_dropout = dropout_prob
+            # If you want, print to confirm
+            # print(f"Set {name}.dropout.p to {dropout_prob}")
