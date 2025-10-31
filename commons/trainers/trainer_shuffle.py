@@ -284,8 +284,9 @@ class MemSeq2SeqTrainer(StaticTrainer):
         if not isinstance(train_dataset, torch.utils.data.IterableDataset):
             dataloader_params["sampler"] = self._get_train_sampler()
             dataloader_params["drop_last"] = self.args.dataloader_drop_last
-            dataloader_params["worker_init_fn"] = partial(
-                    seed_worker, num_workers=self.args.dataloader_num_workers, rank=self.args.process_index)
+            dataloader_params["worker_init_fn"] = seed_worker
+            #dataloader_params["worker_init_fn"] = partial(
+            #        seed_worker, num_workers=self.args.dataloader_num_workers, rank=self.args.process_index)
             dataloader_params["prefetch_factor"] = self.args.dataloader_prefetch_factor
 
         return self.accelerator.prepare(DataLoader(train_dataset, **dataloader_params))
