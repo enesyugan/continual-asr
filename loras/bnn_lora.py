@@ -533,6 +533,7 @@ class BLoB(Linear):
                 # for Bayesian LoRA B, we do init as zero
                 # however with the noise injected, the purpose of zero initialization is not intact
                 nn.init.zeros_(self.lora_B[adapter_name].mu)
+                self.lora_B[adapter_name].log_sigma = nn.Parameter(torch.full((self.lora_B[adapter_name].rows, self.lora_B[adapter_name].cols), -50.0))
 
             if self.lora_bias[adapter_name]:
                 nn.init.zeros_(self.lora_B[adapter_name].bias)
