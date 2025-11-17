@@ -441,6 +441,8 @@ def get_train_dev(config, special_char_removal=True):
             if dev_split_size != 0:
                 if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(
                     train_data)))  # Use x% of the data or 3000 samples max
+                if isinstance(dev_split_size, int): dev_split_size = min(dev_split_size, len(dev_data)-1)
+
                 dev_data = dev_data.shuffle(seed=seed)
                 tmp = dev_data.train_test_split(test_size=dev_split_size)
                 dev_data = tmp["test"]
