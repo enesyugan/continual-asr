@@ -31,10 +31,13 @@ class BLoBLinear(nn.Module):
     """
     def __init__(self, rows, cols,
                  prior_std=0.01,
-                 init_log_sigma=-5.5):
+                 init_log_sigma=-5.5,
+                 use_flipout=True,
+                 zero_init=False):
         super().__init__()
         self.rows = cols
         self.cols = rows
+        self.use_flipout = use_flipout
 
         # This represents the bayesian-ed A matrix in Lora. B is kept deterministic.
 
@@ -53,8 +56,15 @@ class BLoBLinear(nn.Module):
         self.mu = nn.Parameter(torch.zeros(self.rows, self.cols))
         self.log_sigma = nn.Parameter(torch.full((self.rows, self.cols), init_log_sigma))
 
-        self.reset_parameters()
+        if zero_init:
+            self.reset_parameters_zero()
+        else:
+            self.reset_parameters()
         # You might add custom inits here if desired
+
+    def reset_parameters_zero(self) -> None:
+        self.mu = nn.Parameter(torch.zeros(self.rows, self.cols))
+        self.log_sigma = nn.Parameter(torch.full((self.rows, self.cols), -50.0))
 
     def reset_parameters(self) -> None:
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
@@ -76,7 +86,10 @@ class BLoBLinear(nn.Module):
         from multiple samples. By default, let's do 5 samples.
         """
         # return self.sample_and_merge(number_of_samples=32)
-        return self.mu
+       
+        sampled_weight = self.mu + (torch.randn_like(self.mu)*self.sigma)
+        return sampled_weight
+        #return self.mu
 
     @property
     def sigma(self) -> torch.Tensor:
@@ -127,21 +140,25 @@ class BLoBLinear(nn.Module):
             #
             # # what we should do here is:
             #
-            lora_output = F.linear(x, self.mu)
-
             noisy_weight = eps * sigma
 
-            # sample the random signs for flipout
-            with torch.no_grad():
+            if self.use_flipout:
+                lora_output = F.linear(x, self.mu)
 
-                # rademacher noise
-                r_A = 2 * torch.randint(0, 2, x.shape, device=x.device, dtype=x.dtype) - 1
+                # sample the random signs for flipout
+                with torch.no_grad():
 
-                s_A = 2 * torch.randint(0, 2, lora_output.shape, device=x.device, dtype=x.dtype) - 1
+                    # rademacher noise
+                    r_A = 2 * torch.randint(0, 2, x.shape, device=x.device, dtype=x.dtype) - 1
 
-            lora_noise = F.linear(x.mul(r_A), noisy_weight).mul(s_A)
+                    s_A = 2 * torch.randint(0, 2, lora_output.shape, device=x.device, dtype=x.dtype) - 1
 
-            return lora_output + lora_noise
+                lora_noise = F.linear(x.mul(r_A), noisy_weight).mul(s_A)
+
+                return lora_output + lora_noise
+            else:
+                sampled_weight = self.mu + noisy_weight
+                return F.linear(x, sampled_weight)
 
         else:
 
@@ -310,8 +327,8 @@ class BayesianLoRALayer(LoraLayer):
         # self.lora_bias[adapter_name] = lora_bias
 
         # self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
-        self.lora_A[adapter_name] = BLoBLinear(self.in_features, r, prior_std=self.prior_std)
-        self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=lora_bias)
+        self.lora_A[adapter_name] = BLoBLinear(self.in_features, r, prior_std=self.prior_std, use_flipout=True)
+        self.lora_B[adapter_name] = BLoBLinear(r, self.out_features, prior_std=self.prior_std, use_flipout=True, zero_init=True)#nn.Linear(r, self.out_features, bias=lora_bias)
         self.lora_bias[adapter_name] = lora_bias
 
         if use_rslora:
