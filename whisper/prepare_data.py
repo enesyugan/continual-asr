@@ -16,6 +16,7 @@ from random import shuffle
 from concurrent.futures import ThreadPoolExecutor
 import torch
 from normalizers import ArNormalizer
+
 # from trainer_mem import MemSeq2SeqTrainer
 from trainers.trainer_mem import MemSeq2SeqTrainer
 
@@ -97,6 +98,7 @@ mapper_orig = {
     "be": "<|be|>",
     "et": "<|et|>",
 	"bn": "<|bn|>",
+    "fr": "<|fr|>",
     "mix": "mix",
     "<unk>": "<unk>",
     "<eos>": "<eos>",
@@ -157,7 +159,7 @@ def detect_language(text, mapper):
     return tmp
 
 
-def load_asr_dataset(file_path, language,
+def load_asr_dataset(file_path, language, task,
                      lower, remove_punct, special_char_removal=True):
     csw = True
     normalizers = []
@@ -193,7 +195,7 @@ def load_asr_dataset(file_path, language,
         # if not os.path.exists(wavpath): skipped +=1; continue
 
         duration = float(duration)  # ms
-        if duration < 500 or duration > 20000: skipped += 1; continue
+        if duration < 200 or duration > 20000: skipped += 1; continue
 
         if special_char_removal:
             transcript = remove_special_characters(transcript, lower, remove_punct)
@@ -205,6 +207,7 @@ def load_asr_dataset(file_path, language,
                 transcript = normalizer(transcript)
 
         transcript = " ".join(transcript.split())
+        if len(transcript.split()) > 200: skipped += 1; continue
 
         language_str = ",".join(language)
 
@@ -217,9 +220,16 @@ def load_asr_dataset(file_path, language,
             lang_mix_id = mapper_orig[language[0]]
             language_ids = [mapper_orig[language[0]] for _ in transcript.split()]
 
-        # if len(parts) >= 3:  # Assuming at least 5 columns in STM file
-        # transcript = "<|startoftranscript|><|{}|><|transcribe|><|notimestamps|> {}<|endoftext|>".format(language[0],transcript)
-        transcript = "<|startoftranscript|><|{}|><|transcribe|><|notimestamps|> {}<|endoftext|>".format(language[0],
+
+        #transcript = transcript.replace(" ", "<|{}|> ".format(language[0]))
+        #transcript = "<|{}|> {}".format(language[0], transcript)
+        if task == "transcribe":
+            task_token = "<|transcribe|>"
+        elif task == "translate":
+            task_token = "<|translate|>"
+        else:
+            print(NOT_IMPLEMENTED)
+        transcript = "<|startoftranscript|><|{}|>{}<|notimestamps|> {}<|endoftext|>".format(language[0], task_token,
                                                                                                         transcript)
 
         data.append({
@@ -383,6 +393,7 @@ def get_train_dev(config, special_char_removal=True):
 
         # Extract fields with defaults
         language = dataset_config.get("language", None)
+        task = dataset_config.get("task", "transcribe")
         dev_split_size = dataset_config.get("dev_split_size", 0)
         lower = dataset_config.get("lower", False)
         text_preprocessing = dataset_config.get("text_preprocessing", None)
@@ -417,6 +428,7 @@ def get_train_dev(config, special_char_removal=True):
         print(f"  path               = {path_list}")
         print(f"  dev_path           = {dev_path_list}")
         print(f"  language           = {language}")
+        print(f"  task               = {task}")
         print(f"  dev_split_size     = {dev_split_size}")
         print(f"  lower              = {lower}")
         print(f"  remove_punct       = {remove_punct}")
@@ -426,7 +438,7 @@ def get_train_dev(config, special_char_removal=True):
         dev_list = list()
 
         for tr_path in path_list:
-            train_data = load_asr_dataset(tr_path, language,
+            train_data = load_asr_dataset(tr_path, language, task,
                                           lower, remove_punct,
                                           special_char_removal=special_char_removal).shuffle(seed=seed)
             if len(dev_path_list) == 0 and dev_split_size != 0:
@@ -443,7 +455,7 @@ def get_train_dev(config, special_char_removal=True):
             train_data_dict[dataset_name] = concatenate_datasets(train_list).shuffle(seed=seed)
        
         for dev_path in dev_path_list:
-            dev_data = load_asr_dataset(dev_path, language,
+            dev_data = load_asr_dataset(dev_path, language, task,
                                         lower, remove_punct, special_char_removal=special_char_removal)
             if dev_split_size != 0:
                 if isinstance(dev_split_size, float): dev_split_size = min(3000, int(dev_split_size * len(train_data)))  # Use x% of the data or 3000 samples max

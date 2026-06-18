@@ -58,7 +58,7 @@ def split_dataset(dataset, num_chunks):
 
 
 def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_path,
-                          tgt_lang, custom_lora, device_id, batch_size, beam_size,
+                          tgt_lang, task, custom_lora, device_id, batch_size, beam_size,
                           no_repeat_ngram_size, total_samples,
                           no_progress_bar, lora_weights, result_queue):
     """Loads model on specific GPU and decodes its chunk."""
@@ -139,19 +139,27 @@ def load_model_and_decode(rank, dataset_split, model_path, lora_path, tokenizer_
     de_id = processor.tokenizer.convert_tokens_to_ids("<|de|>")
 
     transcribe_id = processor.tokenizer.convert_tokens_to_ids("<|transcribe|>")
+    translate_id = processor.tokenizer.convert_tokens_to_ids("<|translate|>")
     notimestamps_id = processor.tokenizer.convert_tokens_to_ids("<|notimestamps|>")
     # print(f"zh: {zh_id} en: {en_id} es: {es_id} de: {de_id}")
     forced_decoder_ids = list()
     # print(model.generation_config.forced_decoder_ids[0], flush=True)
     # print(ASD)
     if tgt_lang == "":
+        if task == "translate": print(f"ERROR: specify target language for translation"); print(ASD)
         forced_decoder_ids.append(model.generation_config.forced_decoder_ids[0])
     else:
         tgt_lang_id = processor.tokenizer.convert_tokens_to_ids(tgt_lang)
         print(f"Set target lang:{tgt_lang} id: {tgt_lang_id}")
         forced_decoder_ids.append([1, tgt_lang_id])
 
-    forced_decoder_ids.append([2, transcribe_id])
+    if task == "transcribe":
+        forced_decoder_ids.append([2, transcribe_id])
+    elif task == "translate":
+        forced_decoder_ids.append([2, translate_id])
+    else:
+        print(ASD)
+    
     forced_decoder_ids.append([3, notimestamps_id])
 
     model.config.forced_decoder_ids = None
@@ -260,6 +268,7 @@ if __name__ == "__main__":
                         help='Source file to decode (one line per sequence)')
     parser.add_argument('-tgt_lang', required=False, default="", type=str,
                         help="set language token to decode into,i.e. <|en|>, <|de|>, ...")
+    parser.add_argument('-task', default="transcribe", type=str, help="def: transcribe or set translate")
     # parser.add_argument('-huggingface_dataset', required=False, default="",
     #                     help="If src is none, using huggingface dataset")
     parser.add_argument('-batch_size', type=int, default=8,
@@ -311,7 +320,7 @@ if __name__ == "__main__":
             process = mp.Process(target=load_model_and_decode,
                                  args=(gpu_id, dataset_chunks[gpu_id],
                                        args.model_path, args.lora_path, args.tokenizer_path,
-                                       args.tgt_lang, args.custom_lora, gpu_id,
+                                       args.tgt_lang, args.task, args.custom_lora, gpu_id,
                                        args.batch_size, args.beam_size, args.no_repeat_ngram_size,
                                        total_size, args.no_progress_bar, args.lora_weights,
                                        result_queue))
@@ -320,7 +329,7 @@ if __name__ == "__main__":
 
     else:
         load_model_and_decode(0, test_dataset, args.model_path, args.lora_path, args.tokenizer_path,
-                              args.tgt_lang, args.custom_lora, 0,
+                              args.tgt_lang, args.task, args.custom_lora, 0,
                               args.batch_size, args.beam_size, args.no_repeat_ngram_size, total_size,
                               args.no_progress_bar, args.lora_weights, result_queue)
 
