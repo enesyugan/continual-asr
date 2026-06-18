@@ -32,6 +32,7 @@ from torch import nn
 from memory_efficient_whisper import create_whisper_model
 from utils import DataCollatorSpeechSeq2SeqWithPadding
 from prepare_data import get_train_dev
+from data_utils import do_csw_backup
 
 local_rank = int(os.environ.get("LOCAL_RANK", 0))
 device = torch.device(f"cuda:{local_rank}")
@@ -49,6 +50,8 @@ parser.add_argument('-low_rank_type', type=str, default="lora",
                     help='Whisper Model size: ["lora", "pissa", "olora", "eva", "rslora", "dora"')
 parser.add_argument('-low_rank_modules', type=str, default="qv",
                     help='Whisper Model size: ["qv", "all-linear"')
+parser.add_argument('-lora_rank', type=int, default=32,
+                    help='The rank of the lora matrices')
 parser.add_argument('-data_config', type=str, required=True,
                     help="Path to the dataset config fule (YAML or JSON).")
 parser.add_argument('-lower_case', action='store_true',
@@ -109,13 +112,25 @@ parser.add_argument('-disable_safetensors', action='store_true',
 
 parser.add_argument('-keep_special_character', action='store_true',
                         help="Ignore the special character removal")
-
+parser.add_argument(
+    "-focal_gamma",
+    type=float,
+    default=0.0,
+    help="Focal-loss gamma. Zero disables focal loss.",
+)
+parser.add_argument(
+    "-latin_boost",
+    type=float,
+    default=1.0,
+    help="how much to boost latin tokens.",
+)
 args = parser.parse_args()
 print(args)
 
 
 training_uid_mapper = None
 dev_uid_mapper = None
+concat_tr_dataset = None
 
 # 2. Load config from YAML (or JSON)
 with open(args.data_config, "r") as f:
@@ -125,11 +140,27 @@ with open(args.data_config, "r") as f:
 all_tr_dataset, all_dev_dataset = get_train_dev(data_config,
                                                 special_char_removal= not args.keep_special_character)
 
+if False: #args.csw_data_augmentation:
+    all_tr_dataset_list = list(all_tr_dataset.values())
+    print("1: {}".format(all_tr_dataset_list[0][0], flush=True))
+    #all_dev_dataset_list = all_tr_dataset
+    concat_tr_dataset = concatenate_datasets(all_tr_dataset_list)
+    #concat_dev_dataset = concatenate_datasets(all_dev_dataset_list)
+
+    csw_tr_dataset = do_csw_backup(all_tr_dataset_list, int((concat_tr_dataset.num_rows/5)/len(all_tr_dataset_list)), remove_punct=False, special_char_removal=False, train=True)
+    all_tr_dataset["csw_data_augmented"] = csw_tr_dataset
+    print("2: {}".format(csw_tr_dataset[0], flush=True))
+   # csw_dev_dataset = do_csw_backup(all_dev_dataset_list, int((concat_dev_dataset.num_rows/10)/len(all_dev_dataset_list)), remove_punct=False, special_char_removal=False, train=True)
+    
+   # all_dev_dataset = concatenate_datasets([csw_dev_dataset, all_dev_dataset])
+    training_uid_mapper = {key: idx for idx, key in enumerate(concat_tr_dataset["uid"])}
+    #dev_uid_mapper = {key: idx for idx, key in enumerate(all_dev_dataset["uid"])}
+
+    
+
 print("Training dataset loaded:", all_tr_dataset)
 print("Development dataset loaded:", all_dev_dataset)
 
-# training_uid_mapper = {key: idx for idx, key in enumerate(concat_tr_dataset["uid"])}
-# dev_uid_mapper = {key: idx for idx, key in enumerate(all_dev_dataset["uid"])}
 
 
 def count_parameters(model: nn.Module):
@@ -156,6 +187,8 @@ if args.model_size == "large":
     model_name = "openai/whisper-large-v3-turbo"
 elif args.model_size == "small":
     model_name = "openai/whisper-small"
+elif args.model_size == "v3":
+    model_name = "openai/whisper-large-v3"
 else:
     model_name = args.model_size
 
@@ -171,6 +204,8 @@ model = create_whisper_model(checkpoint_path, torch_dtype,
 model.config.forced_decoder_ids = None
 model.config.suppress_tokens = []
 model.label_smoothing = args.label_smoothing
+model.focal_gamma = args.focal_gamma
+model.latin_boost = args.latin_boost
 print("pad_token_id: {}".format(model.config.pad_token_id))
 
 print(model)
@@ -202,8 +237,20 @@ if len(args.low_rank_type) > 0:
         for param in model.parameters():
             param.requires_grad = True
 
+    elif args.low_rank_type == "decoder_ft":
+        """
+        Fully fine-tuning of the decoder.
+        """
+        print("Performing decoder only fine-tunining.")
+        for param in model.parameters():
+            param.requires_grad = True
+
+        for param in model.model.encoder.parameters():
+            param.requires_grad = False
+
+
     elif args.low_rank_type == "lora":
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
         model.add_adapter(lora_config)
 
@@ -211,7 +258,7 @@ if len(args.low_rank_type) > 0:
         """
         PiSSA initializes the LoRA adapter using the principal singular values and singular vectors
         """
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules,
                                  init_lora_weights="pissa",
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
@@ -223,7 +270,7 @@ if len(args.low_rank_type) > 0:
         i.e., it mutates the weights before performing any training on them
         """
 
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules,
                                  init_lora_weights="olora",
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
@@ -236,7 +283,7 @@ if len(args.low_rank_type) > 0:
         """
         from peft import EvaConfig
 
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules,
                                  init_lora_weights="eva",
                                  eva_config=EvaConfig(rho=2.0),
                                  lora_dropout=0.05,
@@ -245,7 +292,7 @@ if len(args.low_rank_type) > 0:
 
     elif args.low_rank_type == "rslora":
 
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules,
                                  use_rslora=True,
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
@@ -257,7 +304,7 @@ if len(args.low_rank_type) > 0:
         Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter
         """
 
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules,
                                  use_dora=True,
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
@@ -486,13 +533,15 @@ train_dataset = interleave_datasets(list(all_tr_dataset.values()), probabilities
 
 data_collator = DataCollatorSpeechSeq2SeqWithPadding(feature_extractor=processor.feature_extractor,
                                                      text_processor=processor.tokenizer, model_config=model.config,
-                                                     uid_mapper=training_uid_mapper, dataset=train_dataset,
+                                                     uid_mapper=training_uid_mapper, dataset=concat_tr_dataset,
                                                      do_augment=args.spec_augment)
+data_collator.init()
 
 eval_data_collator = DataCollatorSpeechSeq2SeqWithPadding(feature_extractor=processor.feature_extractor,
                                                           text_processor=processor.tokenizer, model_config=model.config,
                                                           uid_mapper=dev_uid_mapper, dataset=all_dev_dataset,
                                                           do_augment=False)
+eval_data_collator.init()
 
 early_stopping = EarlyStoppingCallback(
     early_stopping_patience=10)
@@ -520,6 +569,7 @@ trainer = MemSeq2SeqTrainer(
     # compute_metrics=compute_metrics,
     tokenizer=processor.feature_extractor,
     callbacks=[early_stopping, LoadFullModelCallback()]
+    #callbacks=[LoadFullModelCallback()]
 )
 
 # trainer.state.stateful_callbacks['EarlyStoppingCallback'] = early_stopping

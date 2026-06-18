@@ -34,6 +34,89 @@ class DataCollatorSpeechSeq2SeqWithPadding:
     ])
     spec_time_masking = T.TimeMasking(time_mask_param=30)
     spec_freq_masking = T.FrequencyMasking(freq_mask_param=30)
+    
+    # Arabic letters, numerals (Arabic-Indic + Extended), and punctuation (e.g. U+061F “؟”)
+    _arabic_re = re.compile(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]')
+    # Latin letters
+    _latin_re  = re.compile(r'[A-Za-z]')
+    # ASCII digits
+    _latin_digit_re  = re.compile(r'[0-9]')
+    # Arabic-Indic digits (U+0660–U+0669) + Eastern Arabic-Indic digits (U+06F0–U+06F9)
+    _arabic_digit_re = re.compile(r'[\u0660-\u0669\u06F0-\u06F9]')
+
+    # Han (CJK Unified Ideographs) — most common Chinese characters
+    _mandarin_re = re.compile(r'[\u4E00-\u9FFF]')
+    # CJK-specific punctuation / fullwidth forms
+    _mandarin_punct_re = re.compile(r'[\u3000-\u303F\uFF00-\uFFEF]')
+
+    def _script_label_for_token(self, tok: str) -> int:
+        if tok.startswith("<|") and tok.endswith("|>"):
+            return -100
+
+        core = tok.lstrip('ĠĊ')
+        has_ar = bool(self._arabic_re.search(core)) or bool(self._arabic_digit_re.search(core))
+        has_la = bool(self._latin_re.search(core))  or bool(self._latin_digit_re.search(core))
+        has_zh = bool(self._mandarin_re.search(core)) or bool(self._mandarin_punct_re.search(core))
+
+        # we now have three “flags” — ar, la, zh — so count how many scripts appear
+        scripts = has_ar + has_la + has_zh
+        if scripts == 1:
+            if has_ar:
+                return 0
+            if has_la:
+                return 1
+            return 3
+
+        if scripts > 1:
+            return 2
+
+        return -100
+
+        ## 0 = Arabic-only, 1 = Latin-only, 2 = Mixed, -100 = ignore
+        #if has_ar and not has_la:
+        #    return 0
+        #if has_la and not has_ar:
+        #    return 1
+        #if has_ar and has_la:
+        #    return 2
+        ##print(f"NO LANGUAGE: {tok}", flush=True)
+        #return -100
+
+    def init(self):
+        # … your existing setup …
+        tokenizer = self.text_processor
+        
+        # 1) collect every ID the tokenizer can ever output
+        core_ids    = set(tokenizer.get_vocab().values())
+        special_ids = set(tokenizer.all_special_ids)
+        all_ids     = core_ids.union(special_ids)
+
+        # 2) find the largest ID
+        max_id = max(all_ids)
+
+        # 3) build a full (-100) table of size (max_id+1,)
+        id2label = torch.full((max_id + 1,), -100, dtype=torch.int64)
+        
+        # 4) fill in only the IDs that actually exist
+        for tok_id in all_ids:
+            #tok      = tokenizer.convert_ids_to_tokens(tok_id)
+            tok      = tokenizer.decode([tok_id], clean_up_tokenization_spaces=True)
+            if tok_id==1392 or tok_id==23032 or tok_id==118 or tok_id==50258 or tok_id==50272: 
+                print(f"{tok_id}: {tok}")
+                tid = tok_id -1
+                t = tokenizer.decode([tid], clean_up_tokenization_spaces=True)
+                print(f"{tid}: {t}")
+
+                tid = tok_id +1
+                t = tokenizer.decode([tid], clean_up_tokenization_spaces=True)
+                print(f"{tid}: {t}")
+
+            id2label[tok_id] = self._script_label_for_token(tok)
+        
+        # store on the device you’ll be using (cpu or cuda)
+        self.id2label = id2label  # you can also call .to(device) later
+        print(f"3555: {self.id2label[3555]}")
+        print(f"15040: {self.id2label[15040]}")
 
     def get_language_for_token(self, words_batch, language_label_lst, decoder_input_ids):
         bpe_languages_batch = list()
@@ -164,7 +247,14 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         # replace padding with -100 to ignore loss correctly
         labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
-
+		
+        # 2) vectorized lookup: [B, L] of script‐labels
+        script_ids = self.id2label[labels_batch.input_ids]             # [B, L]
+		# 3) mask out pads/specials
+        script_ids = script_ids.masked_fill(labels_batch.attention_mask.ne(1), -100)
+		# 4) shift off the first token to align with your labels[:,1:]
+        batch["script_ids"] = script_ids[:, 1:]           # [B, L-1]
+       
         # if bos token is appended in previous tokenization step,
         # cut bos token here as it's append later anyways
         batch["decoder_input_ids"] = labels_batch.input_ids[:, :-1]

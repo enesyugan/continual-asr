@@ -1,5 +1,5 @@
 from transformers import WhisperForConditionalGeneration
-from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
+from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer, WhisperDecoderLayer
 from transformers.models.whisper.configuration_whisper import WhisperConfig
 
 import torch
@@ -247,6 +247,8 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         self.teacher_distillation = 0
         self.label_smoothing = 0
         self.kl_scale = 0.
+        self.focal_gamma = 0.0
+        self.latin_boost = 1.0
 
     def _compute_kl(self) -> torch.Tensor:
         """
@@ -286,6 +288,57 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
                 module.print_grads()
         # print(f"{total_kl.shape}, {total_kl}"+"=="*30)
 
+    def compute_weighted_ce(
+        self,
+	    lm_logits: torch.FloatTensor,          # [B, T, V]
+	    labels: torch.LongTensor,              # [B, T]
+	    script_ids: torch.LongTensor,          # [B, T]  (values in {0,1,2,-100})
+	    label_smoothing: float = 0.0,
+	    latin_boost: float = 1.0,              # how much more to weight script_id==1
+        focal_gamma=0.0,
+    ):
+	    # 1) flatten everything to [B*T]
+        B, T, V = lm_logits.size()
+        logits_flat = lm_logits.view(-1, V)            # [B*T, V]
+        labels_flat = labels.view(-1)                  # [B*T]
+        script_flat = script_ids.view(-1)              # [B*T]
+
+        # 2) per-token CE loss, ignoring -100
+        loss_fct = CrossEntropyLoss(
+	        ignore_index=-100,
+	        reduction='none',
+	        label_smoothing=label_smoothing
+        )
+        loss_per = loss_fct(logits_flat, labels_flat)  # [B*T], zero where labels_flat==-100
+
+        #print(f"FOCAL {focal_gamma} BOOST: {latin_boost}",flush=True)
+        # Focal Loss:
+        if focal_gamma > 0:
+            nll_per = F.cross_entropy(
+                logits_flat,
+                labels_flat,
+                ignore_index=-100,
+                reduction="none",
+            )
+            pt = torch.exp(-nll_per)
+            loss_per = loss_per * (1.0 -pt).pow(focal_gamma)
+
+        # 3) build weights: default=1, boost where script_id==1, zero out ignore_index
+        weights = torch.ones_like(labels_flat, dtype=torch.float, device=labels.device)
+        weights = weights.masked_fill(labels_flat == -100, 0.0)
+        weights[script_flat == 1]   = latin_boost # boost all script_id==1 tokens
+
+        #weights = weights.masked_scatter(
+	    #    script_flat == 1,
+	    #    torch.full((script_flat == 1).sum(), latin_boost, dtype=weights.dtype, device=weights.device)
+        #)
+
+        #print(f"weights: {weights}", flush=True)
+        # 4) weighted average
+        total_weight = weights.sum().clamp_min(1e-6)
+        loss = (loss_per * weights).sum() / total_weight
+
+        return loss
 
     def forward(
             self,
@@ -301,6 +354,7 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
             decoder_inputs_embeds: Optional[Tuple[torch.FloatTensor]] = None,
             decoder_position_ids: Optional[Tuple[torch.LongTensor]] = None,
             labels: Optional[torch.LongTensor] = None,
+            script_ids: Optional[torch.LongTensor] = None,
             use_cache: Optional[bool] = None,
             output_attentions: Optional[bool] = None,
             output_hidden_states: Optional[bool] = None,
@@ -399,39 +453,18 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         distilled_loss = None
         additional_losses = {}
         if labels is not None:
-
-            labels = labels.to(lm_logits.device).reshape(-1)
-            logits = lm_logits.view(-1, self.config.vocab_size)
-            label_smoothing = self.label_smoothing if self.training else 0.0
-            bsz = labels.size(0)
-
-            ignore_index = -100
-            mask = labels.ne(ignore_index)
-            total = mask.float().sum()
-
-            if fast_xentropy:
-
-                half_to_float = (logits.dtype == torch.float16) or (logits.dtype == torch.bfloat16)
-                loss = softmax_xentropy(logits, labels,
-                                        label_smoothing,  # smoothing
-                                        -100,  # padding
-                                        half_to_float)
-
-                loss = loss.sum().div(total)
-                ce_loss = loss
-            else:
-                # note: these are the default values in pytorch/huggingface.
-                # they are
-
-                loss_fct = CrossEntropyLoss(ignore_index=-100,
-                                            reduction='mean',
-                                            label_smoothing=label_smoothing)
-                # move labels to correct device to enable PP
-                loss = loss_fct(logits, labels)
-                ce_loss = loss
-
-            # kl_loss = self._compute_kl() * self.kl_scale
-
+            labels = labels.to(lm_logits.device)
+            script_ids = script_ids.to(lm_logits.device)
+            smoothing = self.label_smoothing if self.training else 0.0
+            loss = self.compute_weighted_ce(
+						lm_logits=lm_logits,
+						labels=labels,
+						script_ids=script_ids,
+						label_smoothing=smoothing,
+						latin_boost=self.latin_boost if self.training else 1.0, #1.0,
+                        focal_gamma=self.focal_gamma if self.training else 0.0,
+            )
+            ce_loss = loss
             if self.kl_scale > 0 and self.training:
                 kl_loss = self._compute_kl()
                 kl_loss = kl_loss.to(dtype=ce_loss.dtype)
@@ -449,7 +482,7 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
 
             ce_loss_data = ce_loss.item()
             additional_losses["ce_loss"] = ce_loss_data
-            if self.kl_scale > 0.0:
+            if self.kl_scale > 0:
                 additional_losses["kl_loss"] = kl_loss_data
 
             if teacher_lm_logits is not None:
@@ -542,8 +575,7 @@ def create_whisper_model(model_name, torch_dtype,
     def replace_layernorm_with_memory_efficient(model):
         for name, module in model.named_children():
             # Check if the current module is LayerNorm
-            if isinstance(module, torch.nn.LayerNorm):
-
+            if isinstance(module, torch.nn.LayerNorm): 
                 custom_layer = MemoryEfficientLayerNorm(module.normalized_shape, module.eps)
 
                 # Copy weights and biases
