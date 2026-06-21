@@ -100,7 +100,6 @@ python qwen2/train_csw_lora.py \
 
 This repository includes adaptation code for:
 
-- `openai/whisper-large-v3-turbo`
 - OpenAI Whisper models
 - `Qwen/Qwen2-Audio-7B`
 - Hugging Face Transformers speech models
@@ -121,10 +120,11 @@ If you use this repository, please cite the relevant paper:
   organization={IEEE}
 }
 
-@article{ugan2025weight,
-  title={Weight factorization and centralization for continual learning in speech recognition},
-  author={Ugan, Enes Yavuz and Pham, Ngoc-Quan and Waibel, Alexander},
-  journal={arXiv preprint arXiv:2506.16574},
+@inproceedings{ugan2025weight,
+  title={Weight Factorization and Centralization for Continual Learning in Speech Recognition},
+  author={Ugan, Enes and Pham, Ngoc-Quan and Waibel, Alexander},
+  booktitle={Proc. Interspeech 2025},
+  pages={2200--2204},
   year={2025}
 }
 
