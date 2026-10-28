@@ -248,6 +248,67 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         self.label_smoothing = 0
         self.kl_scale = 0.
         self.kl_type = "kl_div"
+        self.l2_sp_scale = 0.0
+        self.l2_sp_reduction = "mean"
+        self._l2_sp_layers = []
+
+    @torch.no_grad()
+    def init_l2_sp(self, scale, reduction="mean"):
+        if reduction not in ("mean", "sum"):
+            raise ValueError("l2_sp_reduction must be mean or sum")
+        self.l2_sp_reduction = reduction
+        if scale < 0:
+            raise ValueError("l2_sp_scale must be non-negative")
+
+        self.l2_sp_scale = float(scale)
+        self._l2_sp_layers = []
+        if self.l2_sp_scale == 0:
+            return
+
+        for layer in self.model.modules():
+            if not hasattr(layer, "lora_A"):
+                continue
+            if "default" not in layer.lora_A:
+                continue
+            if layer.use_dora.get("default", False):
+                raise ValueError("This L2-SP implementation does not support DoRA")
+
+            a = layer.lora_A["default"].weight
+            b = layer.lora_B["default"].weight
+            if not (a.requires_grad or b.requires_grad):
+                continue
+
+            with torch.autocast(device_type=a.device.type, enabled=False):
+                start_delta = layer.scaling["default"] * (b.float() @ a.float())
+
+            layer.register_buffer(
+                "_l2_sp_start_delta",
+                start_delta.detach().clone(),
+                persistent=False,
+            )
+            self._l2_sp_layers.append(layer)
+
+        if not self._l2_sp_layers:
+            raise ValueError("L2-SP requires trainable linear LoRA adapters")
+
+    def _compute_l2_sp(self):
+        penalty = torch.zeros(
+            (), device=next(self.parameters()).device, dtype=torch.float32
+        )
+        for layer in self._l2_sp_layers:
+            a = layer.lora_A["default"].weight
+            b = layer.lora_B["default"].weight
+
+            with torch.autocast(device_type=a.device.type, enabled=False):
+                delta = layer.scaling["default"] * (b.float() @ a.float())
+                difference = delta - layer._l2_sp_start_delta.float()
+                squared_difference = difference.square()
+                penalty = penalty + (
+                    squared_difference.mean() if self.l2_sp_reduction == "mean"
+                    else squared_difference.sum()
+                )
+
+        return 0.5 * penalty
 
     def _compute_kl(self) -> torch.Tensor:
         """
@@ -453,6 +514,17 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
             additional_losses["ce_loss"] = ce_loss_data
             if self.kl_scale > 0.0:
                 additional_losses["kl_loss"] = kl_loss_data
+
+
+            if self.training and self.l2_sp_scale > 0:
+                l2_sp_loss = self._compute_l2_sp()
+                l2_sp_contribution = self.l2_sp_scale * l2_sp_loss
+                loss = loss + l2_sp_contribution
+
+                additional_losses["l2_sp_loss"] = l2_sp_loss.detach().item()
+                additional_losses["l2_sp_contribution"] = (
+                    l2_sp_contribution.detach().item()
+                )
 
             if teacher_lm_logits is not None:
 

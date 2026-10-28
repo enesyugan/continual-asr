@@ -36,6 +36,8 @@ parser.add_argument('-model_size', type=str, default="small",
                     help='Whisper Model size: ["large", "small".')
 parser.add_argument('-low_rank_type', type=str, default="lora",
                     help='Whisper Model size: ["lora", "pissa", "olora", "eva", "rslora", "dora"')
+parser.add_argument('-lora_rank', type=int, default=32,
+                    help='Rank of the low-rank adapters')
 parser.add_argument('-low_rank_modules', type=str, default="qv",
                     help='Whisper Model size: ["qv", "all-linear"')
 parser.add_argument('-data_config', type=str, required=True,
@@ -51,6 +53,11 @@ parser.add_argument('-learning_rate', type=float, default=0.001,
                     used, then this is the global learning rate. Recommended
                     settings: sgd = 1, adagrad = 0.1,
                     adadelta = 1, adam = 0.001""")
+parser.add_argument('-l2_sp_scale', type=float, default=0.0,
+                    help="Coefficient of the L2-SP penalty on scaled LoRA "
+                         "weight products; 0 disables it.")
+parser.add_argument('-l2_sp_reduction', choices=['mean', 'sum'], default='mean',
+                    help='Reduction over entries of each L2-SP weight matrix; layers are summed')
 parser.add_argument('-warmup_steps', type=int, default=2000,
                     help='Number of warm up steps for learning rate')
 parser.add_argument('-lr_scheduler', type=str, default="inv_sqrt",
@@ -192,7 +199,7 @@ if len(args.low_rank_type) > 0:
             param.requires_grad = True
 
     elif args.low_rank_type == "lora":
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules, lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
         model.add_adapter(lora_config)
 
@@ -200,7 +207,7 @@ if len(args.low_rank_type) > 0:
         """
         PiSSA initializes the LoRA adapter using the principal singular values and singular vectors
         """
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules,
                                  init_lora_weights="pissa",
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
@@ -212,7 +219,7 @@ if len(args.low_rank_type) > 0:
         i.e., it mutates the weights before performing any training on them
         """
 
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules,
                                  init_lora_weights="olora",
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
@@ -225,7 +232,7 @@ if len(args.low_rank_type) > 0:
         """
         from peft import EvaConfig
 
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules,
                                  init_lora_weights="eva",
                                  eva_config=EvaConfig(rho=2.0),
                                  lora_dropout=0.05,
@@ -234,7 +241,7 @@ if len(args.low_rank_type) > 0:
 
     elif args.low_rank_type == "rslora":
 
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules,
                                  use_rslora=True,
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
@@ -246,7 +253,7 @@ if len(args.low_rank_type) > 0:
         Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter
         """
 
-        lora_config = LoraConfig(r=32, lora_alpha=64, target_modules=lora_target_modules,
+        lora_config = LoraConfig(r=args.lora_rank, lora_alpha=64, target_modules=lora_target_modules,
                                  use_dora=True,
                                  lora_dropout=0.05,
                                  bias="none")  # , modules_to_save=["pre_proj_out"])
@@ -272,6 +279,14 @@ else:
 
 
 count_parameters(model)
+
+
+model.init_l2_sp(args.l2_sp_scale, reduction=args.l2_sp_reduction)
+if args.l2_sp_scale > 0:
+    print(
+        f"[INFO] L2-SP scale={args.l2_sp_scale}; reduction={args.l2_sp_reduction}; "
+        f"regularizing {len(model._l2_sp_layers)} LoRA layers"
+    )
 
 if args.teacher_distillation > 0:
     print("[INFO] Using the Whisper model as a teacher")
@@ -508,7 +523,8 @@ trainer = MemSeq2SeqTrainer(
     optimizers=(optimizer, lr_scheduler),
     # compute_metrics=compute_metrics,
     tokenizer=processor.feature_extractor,
-    callbacks=[early_stopping, LoadFullModelCallback()]
+    #callbacks=[early_stopping, LoadFullModelCallback()]
+    callbacks=[LoadFullModelCallback()]
 )
 
 # trainer.state.stateful_callbacks['EarlyStoppingCallback'] = early_stopping

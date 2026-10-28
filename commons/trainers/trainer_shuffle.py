@@ -291,7 +291,84 @@ class MemSeq2SeqTrainer(StaticTrainer):
 
         return self.accelerator.prepare(DataLoader(train_dataset, **dataloader_params))
 
+    def log(self, logs, start_time=None):
+        count = getattr(self, "_l2_sp_log_count", 0)
 
+        if "loss" in logs and count > 0:
+            names = sorted(self._l2_sp_log_sums)
+            totals = torch.tensor(
+                [self._l2_sp_log_sums[name] for name in names] + [count],
+                device=self.accelerator.device,
+                dtype=torch.float64,
+            )
+            totals = self.accelerator.reduce(totals, reduction="sum")
+
+            for index, name in enumerate(names):
+                logs[f"train_{name}"] = (
+                    totals[index] / totals[-1]
+                ).item()
+
+            self._l2_sp_log_sums = {}
+            self._l2_sp_log_count = 0
+
+        return super().log(logs, start_time=start_time)
+
+    def _diagnose_l2_sp_gradients(self, model, outputs):
+        step = self.state.global_step
+        unwrapped = self.accelerator.unwrap_model(model)
+
+        diagnose = (
+            model.training
+            and self.accelerator.num_processes == 1
+            and getattr(unwrapped, "l2_sp_scale", 0.0) > 0
+            and step > 0
+            and step % self.args.logging_steps == 0
+            and getattr(self, "_last_l2_sp_diagnostic_step", None) != step
+        )
+        if not diagnose:
+            return
+
+        params = [
+            parameter
+            for name, parameter in unwrapped.named_parameters()
+            if parameter.requires_grad
+            and ("lora_A." in name or "lora_B." in name)
+        ]
+        if not params:
+            return
+
+        def gradient_norm(term):
+            gradients = torch.autograd.grad(
+                term,
+                params,
+                retain_graph=True,
+                allow_unused=True,
+            )
+            squared_norm = torch.zeros(
+                (), device=term.device, dtype=torch.float32
+            )
+            for gradient in gradients:
+                if gradient is not None:
+                    squared_norm = (
+                        squared_norm
+                        + gradient.detach().float().square().sum()
+                    )
+            return squared_norm.sqrt().item()
+
+        ce_norm = gradient_norm(outputs["ce_loss"])
+        weighted_sp = unwrapped.l2_sp_scale * unwrapped._compute_l2_sp()
+        sp_norm = gradient_norm(weighted_sp)
+
+        ratio = sp_norm / ce_norm if ce_norm > 0 else float("nan")
+
+        print(
+            f"[L2-SP gradients] step={step} "
+            f"ce_grad_norm={ce_norm:.6e} "
+            f"weighted_sp_grad_norm={sp_norm:.6e} "
+            f"sp_to_ce_ratio={ratio:.6e}",
+            flush=True,
+        )
+        self._last_l2_sp_diagnostic_step = step
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -309,6 +386,10 @@ class MemSeq2SeqTrainer(StaticTrainer):
                 loss_kwargs["num_items_in_batch"] = num_items_in_batch
             inputs = {**inputs, **loss_kwargs}
         outputs = model(**inputs)
+
+        #diagnose gradient influence:
+        #self._diagnose_l2_sp_gradients(model, outputs)
+        
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:
@@ -340,14 +421,22 @@ class MemSeq2SeqTrainer(StaticTrainer):
             loss *= self.accelerator.num_processes
 
         additional_losses = outputs.get("additional_losses", None)
-        #print("===="*50)
-        #print(additional_losses, flush=True)
-        #print(return_outputs, flush=True)
         if additional_losses is not None:
             self.state.additional_losses = {
-                name: (loss.item() if hasattr(loss, "item") else loss)
-                for name, loss in additional_losses.items()
+                name: (value.item() if hasattr(value, "item") else value)
+                for name, value in additional_losses.items()
             }
+
+            if model.training and "l2_sp_loss" in self.state.additional_losses:
+                if not hasattr(self, "_l2_sp_log_sums"):
+                    self._l2_sp_log_sums = {}
+                    self._l2_sp_log_count = 0
+
+                for name, value in self.state.additional_losses.items():
+                    self._l2_sp_log_sums[name] = (
+                        self._l2_sp_log_sums.get(name, 0.0) + float(value)
+                    )
+                self._l2_sp_log_count += 1
 
         return (loss, outputs) if return_outputs else loss
 
