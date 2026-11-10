@@ -427,7 +427,10 @@ class MemSeq2SeqTrainer(StaticTrainer):
                 for name, value in additional_losses.items()
             }
 
-            if model.training and "l2_sp_loss" in self.state.additional_losses:
+            if model.training and (
+                "l2_sp_loss" in self.state.additional_losses
+                or "l1_loss" in self.state.additional_losses
+            ):
                 if not hasattr(self, "_l2_sp_log_sums"):
                     self._l2_sp_log_sums = {}
                     self._l2_sp_log_count = 0

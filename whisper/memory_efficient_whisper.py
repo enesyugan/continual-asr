@@ -249,20 +249,21 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
         self.kl_scale = 0.
         self.kl_type = "kl_div"
         self.l2_sp_scale = 0.0
-        self.l2_sp_reduction = "mean"
         self._l2_sp_layers = []
+        self.l1_scale = 0.0
 
     @torch.no_grad()
-    def init_l2_sp(self, scale, reduction="mean"):
-        if reduction not in ("mean", "sum"):
-            raise ValueError("l2_sp_reduction must be mean or sum")
-        self.l2_sp_reduction = reduction
+    def init_l2_sp(self, scale, l1_scale=0.0):
         if scale < 0:
             raise ValueError("l2_sp_scale must be non-negative")
+        if l1_scale < 0:
+            raise ValueError("l1_scale must be non-negative")
+
 
         self.l2_sp_scale = float(scale)
+        self.l1_scale = float(l1_scale)
         self._l2_sp_layers = []
-        if self.l2_sp_scale == 0:
+        if self.l2_sp_scale == 0 and self.l1_scale == 0:
             return
 
         for layer in self.model.modules():
@@ -302,13 +303,24 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
             with torch.autocast(device_type=a.device.type, enabled=False):
                 delta = layer.scaling["default"] * (b.float() @ a.float())
                 difference = delta - layer._l2_sp_start_delta.float()
-                squared_difference = difference.square()
-                penalty = penalty + (
-                    squared_difference.mean() if self.l2_sp_reduction == "mean"
-                    else squared_difference.sum()
-                )
+                penalty = penalty + difference.square().sum()
 
         return 0.5 * penalty
+
+    def _compute_l1(self):
+        penalty = torch.zeros(
+            (), device=next(self.parameters()).device, dtype=torch.float32
+        )
+
+        for layer in self._l2_sp_layers:
+            a = layer.lora_A["default"].weight
+            b = layer.lora_B["default"].weight
+
+            with torch.autocast(device_type=a.device.type, enabled=False):
+                delta = layer.scaling["default"] * (b.float() @ a.float())
+                penalty = penalty + delta.abs().sum()
+
+        return penalty
 
     def _compute_kl(self) -> torch.Tensor:
         """
@@ -524,6 +536,16 @@ class MemoryEfficientWhisper(WhisperForConditionalGeneration):
                 additional_losses["l2_sp_loss"] = l2_sp_loss.detach().item()
                 additional_losses["l2_sp_contribution"] = (
                     l2_sp_contribution.detach().item()
+                )
+
+            if self.training and self.l1_scale > 0:
+                l1_loss = self._compute_l1()
+                l1_contribution = self.l1_scale * l1_loss
+                loss = loss + l1_contribution
+
+                additional_losses["l1_loss"] = l1_loss.detach().item()
+                additional_losses["l1_contribution"] = (
+                    l1_contribution.detach().item()
                 )
 
             if teacher_lm_logits is not None:

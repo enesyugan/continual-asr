@@ -55,9 +55,10 @@ parser.add_argument('-learning_rate', type=float, default=0.001,
                     adadelta = 1, adam = 0.001""")
 parser.add_argument('-l2_sp_scale', type=float, default=0.0,
                     help="Coefficient of the L2-SP penalty on scaled LoRA "
-                         "weight products; 0 disables it.")
-parser.add_argument('-l2_sp_reduction', choices=['mean', 'sum'], default='mean',
-                    help='Reduction over entries of each L2-SP weight matrix; layers are summed')
+                         "weight products, summed over entries and layers; 0 disables it.")
+parser.add_argument('-l1_scale', type=float, default=0.0, 
+                    help="Coefficient of L1 on scaled LoRA weight products, summed over "
+                    "entries and layers; 0 disables it.",)
 parser.add_argument('-warmup_steps', type=int, default=2000,
                     help='Number of warm up steps for learning rate')
 parser.add_argument('-lr_scheduler', type=str, default="inv_sqrt",
@@ -281,10 +282,17 @@ else:
 count_parameters(model)
 
 
-model.init_l2_sp(args.l2_sp_scale, reduction=args.l2_sp_reduction)
+model.init_l2_sp(args.l2_sp_scale, l1_scale=args.l1_scale)
+
+if args.l1_scale > 0:
+    print(
+        f"[INFO] L1 scale={args.l1_scale}; reduction=sum; "
+        f"regularizing {len(model._l2_sp_layers)} LoRA layers"
+    )
+    
 if args.l2_sp_scale > 0:
     print(
-        f"[INFO] L2-SP scale={args.l2_sp_scale}; reduction={args.l2_sp_reduction}; "
+        f"[INFO] L2-SP scale={args.l2_sp_scale}; reduction=sum; "
         f"regularizing {len(model._l2_sp_layers)} LoRA layers"
     )
 
